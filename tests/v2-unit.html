@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>v2 unit tests</title>
+  <style>
+    body { font-family: monospace; padding: 1rem; }
+    .pass { color: green; }
+    .fail { color: red; font-weight: bold; }
+  </style>
+</head>
+<body>
+<h2>v2 unit tests</h2>
+<div id="results"></div>
+<script type="module">
+const results = document.getElementById('results');
+let passed = 0, failed = 0;
+
+function assert(condition, label) {
+  const el = document.createElement('div');
+  el.className = condition ? 'pass' : 'fail';
+  el.textContent = (condition ? '✓ ' : '✗ ') + label;
+  results.appendChild(el);
+  condition ? passed++ : failed++;
+}
+
+// ── isYin tests (Task 2 will populate these) ──────────────────────────────
+// placeholder — will be replaced in Task 2
+
+// ── Summary ───────────────────────────────────────────────────────────────
+const summary = document.createElement('p');
+summary.textContent = `${passed} passed, ${failed} failed`;
+results.appendChild(summary);
+</script>
+</body>
+</html>
