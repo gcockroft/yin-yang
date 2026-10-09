@@ -216,12 +216,71 @@ function physicsStep(sys, theta) {
   }
 }
 
-// ── Animation loop (Task 4 replaces theta accumulation with hover logic) ───
+// ── Hover-to-pause (smootherstep ease-in-out, 3s) ─────────────────────────
+function smootherstep(t) {
+  t = Math.max(0, Math.min(1, t));
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+const HOVER_DURATION  = 3.0;
+let rotSpeed          = SPIN_SPEED;
+let hovering          = false;
+let wasHovering       = false;
+let hoverTime         = 0;
+let speedAtHoverStart = SPIN_SPEED;
+
+const raycaster = new THREE.Raycaster();
+const mouse     = new THREE.Vector2();
+const clock     = new THREE.Clock();
+
+// ── Drag rotation ──────────────────────────────────────────────────────────
+let dragging = false, lastX = null, lastY = null;
+
+renderer.domElement.addEventListener('mousedown', e => {
+  dragging = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+});
+
+window.addEventListener('mouseup', () => { dragging = false; });
+
+window.addEventListener('mousemove', e => {
+  mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  hovering = raycaster.intersectObject(innerSphere).length > 0;
+
+  if (!dragging) return;
+  const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  group.rotation.y += dx * 0.01;
+  group.rotation.x += dy * 0.01;
+});
+
+// ── Animation loop ─────────────────────────────────────────────────────────
 let theta = 0;
 
 function animate() {
   requestAnimationFrame(animate);
-  theta += SPIN_SPEED;
+  const dt = clock.getDelta();
+
+  if (hovering) {
+    if (!wasHovering) {
+      speedAtHoverStart = rotSpeed;
+      hoverTime = 0;
+    }
+    hoverTime += dt;
+    const t = Math.min(hoverTime / HOVER_DURATION, 1.0);
+    rotSpeed = speedAtHoverStart * (1 - smootherstep(t));
+  } else {
+    hoverTime = 0;
+    rotSpeed += (SPIN_SPEED - rotSpeed) * 0.025;
+  }
+  wasHovering = hovering;
+
+  theta += rotSpeed;
   physicsStep(systems, theta);
   renderer.render(scene, camera);
 }
