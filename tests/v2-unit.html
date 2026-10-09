@@ -24,8 +24,29 @@ function assert(condition, label) {
   condition ? passed++ : failed++;
 }
 
-// ── isYin tests (Task 2 will populate these) ──────────────────────────────
-// placeholder — will be replaced in Task 2
+// ── isYin tests ───────────────────────────────────────────────────────────
+function isYin(px, py) {
+  if (px * px + py * py > 1.0) return false;
+  const seedR2 = 0.0324;
+  if (px * px + (py - 0.5) * (py - 0.5) < seedR2) return true;
+  if (px * px + (py + 0.5) * (py + 0.5) < seedR2) return false;
+  if (py >= 0) {
+    if (px * px + (py - 0.5) * (py - 0.5) < 0.25) return false;
+    return px > 0;
+  } else {
+    if (px * px + (py + 0.5) * (py + 0.5) < 0.25) return true;
+    return px > 0;
+  }
+}
+
+assert(isYin(2, 0) === false,        'outside unit circle → false');
+assert(isYin(0.5, 0.5) === true,     'top-right outer wing → yin');
+assert(isYin(-0.5, 0.5) === false,   'top-left outer wing → yang');
+assert(isYin(0, 0.5) === false,      'top center (yang fish head) → yang');
+assert(isYin(0, -0.5) === true,      'bottom center (yin fish head) → yin');
+assert(isYin(0.5, -0.5) === true,    'bottom-right outer wing → yin');
+assert(isYin(-0.5, -0.5) === false,  'bottom-left outer wing → yang');
+assert(isYin(0.01, 0.5) === true,    'just right of top seed → yin (dark seed override)');
 
 // ── Summary ───────────────────────────────────────────────────────────────
 const summary = document.createElement('p');
