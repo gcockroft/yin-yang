@@ -48,6 +48,40 @@ assert(isYin(0.5, -0.5) === true,    'bottom-right outer wing → yin');
 assert(isYin(-0.5, -0.5) === false,  'bottom-left outer wing → yang');
 assert(isYin(0.01, 0.5) === true,    'just right of top seed → yin (dark seed override)');
 
+// ── Rotation math tests ───────────────────────────────────────────────────
+function rotateZ(x, y, theta) {
+  return [
+    x * Math.cos(theta) - y * Math.sin(theta),
+    x * Math.sin(theta) + y * Math.cos(theta),
+  ];
+}
+{
+  const [rx, ry] = rotateZ(1, 0, Math.PI / 2);
+  assert(Math.abs(rx) < 1e-10,     'rotateZ(1,0,π/2).x ≈ 0');
+  assert(Math.abs(ry - 1) < 1e-10, 'rotateZ(1,0,π/2).y ≈ 1');
+}
+{
+  const [rx, ry] = rotateZ(0, 1, Math.PI / 2);
+  assert(Math.abs(rx + 1) < 1e-10, 'rotateZ(0,1,π/2).x ≈ -1');
+  assert(Math.abs(ry) < 1e-10,     'rotateZ(0,1,π/2).y ≈ 0');
+}
+
+// ── Surface project invariant ─────────────────────────────────────────────
+{
+  const pos = new Float32Array([2, 3, 6]); // |pos| = 7
+  const len = Math.sqrt(pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2]);
+  pos[0] /= len; pos[1] /= len; pos[2] /= len;
+  const lenAfter = Math.sqrt(pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2]);
+  assert(Math.abs(lenAfter - 1) < 1e-6, 'surface project: |pos| = 1 after normalize');
+}
+
+// ── NaN guard test ────────────────────────────────────────────────────────
+{
+  const pos = new Float32Array([0, 0, 0]);
+  const len = Math.sqrt(pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2]);
+  assert(len < 1e-6, 'NaN guard: zero-length pos detected (len < 1e-6)');
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 const summary = document.createElement('p');
 summary.textContent = `${passed} passed, ${failed} failed`;

@@ -171,4 +171,59 @@ const systems = [
   { pos: shadowPos, home: shadowHome, vel: shadowVel, geo: shadowGeo },
 ];
 
-renderer.render(scene, camera);
+// ── Physics constants ──────────────────────────────────────────────────────
+const K_SPRING   = 0.012;
+const DAMPING    = 0.88;
+const SPIN_SPEED = 0.004;
+
+// ── Physics step ───────────────────────────────────────────────────────────
+function physicsStep(sys, theta) {
+  const cosT = Math.cos(theta);
+  const sinT = Math.sin(theta);
+  for (const { pos, home, vel, geo } of sys) {
+    const N = pos.length / 3;
+    for (let i = 0; i < N; i++) {
+      const i3 = i * 3;
+      // Rotate home around Z by theta
+      const hx = home[i3]     * cosT - home[i3 + 1] * sinT;
+      const hy = home[i3]     * sinT + home[i3 + 1] * cosT;
+      const hz = home[i3 + 2];
+      // Spring toward rotated home
+      vel[i3]     += K_SPRING * (hx - pos[i3]);
+      vel[i3 + 1] += K_SPRING * (hy - pos[i3 + 1]);
+      vel[i3 + 2] += K_SPRING * (hz - pos[i3 + 2]);
+      // Tangent project: remove radial component from vel
+      const radial = vel[i3] * pos[i3] + vel[i3 + 1] * pos[i3 + 1] + vel[i3 + 2] * pos[i3 + 2];
+      vel[i3]     -= radial * pos[i3];
+      vel[i3 + 1] -= radial * pos[i3 + 1];
+      vel[i3 + 2] -= radial * pos[i3 + 2];
+      // Integrate
+      pos[i3]     += vel[i3];
+      pos[i3 + 1] += vel[i3 + 1];
+      pos[i3 + 2] += vel[i3 + 2];
+      // Surface project (normalize; guard against zero-length)
+      const len = Math.sqrt(pos[i3] * pos[i3] + pos[i3 + 1] * pos[i3 + 1] + pos[i3 + 2] * pos[i3 + 2]);
+      if (len < 1e-6) continue;
+      pos[i3]     /= len;
+      pos[i3 + 1] /= len;
+      pos[i3 + 2] /= len;
+      // Damping
+      vel[i3]     *= DAMPING;
+      vel[i3 + 1] *= DAMPING;
+      vel[i3 + 2] *= DAMPING;
+    }
+    geo.attributes.position.needsUpdate = true;
+  }
+}
+
+// ── Animation loop (Task 4 replaces theta accumulation with hover logic) ───
+let theta = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  theta += SPIN_SPEED;
+  physicsStep(systems, theta);
+  renderer.render(scene, camera);
+}
+
+animate();
