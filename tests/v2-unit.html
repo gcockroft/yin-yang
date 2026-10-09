@@ -82,6 +82,15 @@ function rotateZ(x, y, theta) {
   assert(len < 1e-6, 'NaN guard: zero-length pos detected (len < 1e-6)');
 }
 
+// ── Rotation direction test ───────────────────────────────────────────────
+// theta must decrease each frame (heads-lead, matching v1's group.rotation.z -= rotSpeed)
+{
+  const SPIN = 0.004;
+  let theta = 0;
+  theta -= SPIN;
+  assert(theta < 0, 'rotation direction: theta decreases per frame (heads-lead)');
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 const summary = document.createElement('p');
 summary.textContent = `${passed} passed, ${failed} failed`;

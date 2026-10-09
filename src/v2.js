@@ -280,7 +280,7 @@ function animate() {
   }
   wasHovering = hovering;
 
-  theta += rotSpeed;
+  theta -= rotSpeed;
   physicsStep(systems, theta);
   renderer.render(scene, camera);
 }
