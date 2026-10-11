@@ -24,7 +24,6 @@ const innerSphere = new THREE.Mesh(
   new THREE.SphereGeometry(0.97, 64, 64),
   new THREE.MeshBasicMaterial({ color: 0xffffff })
 );
-
 const group = new THREE.Group();
 group.add(innerSphere);
 scene.add(group);
@@ -44,78 +43,69 @@ function isYin(px, py) {
   }
 }
 
-// ── Fibonacci sphere sampling ──────────────────────────────────────────────
-function generateParticles(numCandidates) {
-  const arr = [];
+// ── Full-sphere Fibonacci grid ─────────────────────────────────────────────
+function makeFibGrid(count) {
+  const arr = new Float32Array(count * 3);
   const phi = Math.PI * (3 - Math.sqrt(5));
-  for (let i = 0; i < numCandidates; i++) {
-    const y = 1 - (i / (numCandidates - 1)) * 2;
-    const r = Math.sqrt(Math.max(0, 1 - y * y));
+  for (let i = 0; i < count; i++) {
+    const y  = 1 - (i / (count - 1)) * 2;
+    const r  = Math.sqrt(Math.max(0, 1 - y * y));
     const th = phi * i;
-    const x = Math.cos(th) * r, z = Math.sin(th) * r;
-    if (isYin(x, y)) arr.push(x, y, z);
+    arr[i * 3]     = Math.cos(th) * r;
+    arr[i * 3 + 1] = y;
+    arr[i * 3 + 2] = Math.sin(th) * r;
   }
-  return new Float32Array(arr);
+  return arr;
 }
 
-function generateYangParticles(numCandidates) {
-  const arr = [];
-  const phi = Math.PI * (3 - Math.sqrt(5));
-  for (let i = 0; i < numCandidates; i++) {
-    const y = 1 - (i / (numCandidates - 1)) * 2;
-    const r = Math.sqrt(Math.max(0, 1 - y * y));
-    const th = phi * i;
-    const x = Math.cos(th) * r, z = Math.sin(th) * r;
-    if (!isYin(x, y)) arr.push(x, y, z);
-  }
-  return new Float32Array(arr);
+// ── Two grids covering the whole sphere ───────────────────────────────────
+//
+// Dense grid  — one home per particle, tight spacing.
+// Sparse grid — ~28× fewer points, wide spacing.
+//
+// Each particle has both a dense home and a sparse home.
+// The sparse home is assigned by index correspondence (same spiral,
+// different density), so the two homes are geographically close —
+// the particle never has to cross the sphere when switching states.
+//
+// The YIN/YANG FIELD rotates (theta).  Each frame, the particle's
+// world position is de-rotated into the body frame and classified.
+// Inside the fish → spring toward dense home (cluster together → dark).
+// Outside the fish → spring toward sparse home (spread apart → light).
+// Absorption/release appears at the boundary as particles physically
+// flow between the two states.
+//
+const N = 50000;   // total particles = size of dense grid
+const M = 1800;    // size of sparse grid  (~28 particles per sparse home)
+
+const denseGrid  = makeFibGrid(N);
+const sparseGrid = makeFibGrid(M);
+
+// Index-based sparse assignment: particle i → sparseGrid[round(i * M/N)]
+const sparseAssign = new Float32Array(N * 3);
+for (let i = 0; i < N; i++) {
+  const j = Math.min(Math.round(i * M / N), M - 1) * 3;
+  sparseAssign[i * 3]     = sparseGrid[j];
+  sparseAssign[i * 3 + 1] = sparseGrid[j + 1];
+  sparseAssign[i * 3 + 2] = sparseGrid[j + 2];
 }
 
-function nearestYinDist(px, py, maxDist) {
-  let best = maxDist + 1;
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
-    const dx = Math.cos(angle), dy = Math.sin(angle);
-    if (!isYin(px + dx * maxDist, py + dy * maxDist)) continue;
-    let lo = 0, hi = maxDist;
-    for (let k = 0; k < 8; k++) {
-      const mid = (lo + hi) / 2;
-      if (isYin(px + dx * mid, py + dy * mid)) hi = mid; else lo = mid;
-    }
-    best = Math.min(best, (lo + hi) / 2);
+// ── Initial positions: correct home for theta = 0 ─────────────────────────
+const pos = new Float32Array(N * 3);
+const vel = new Float32Array(N * 3);  // zero-initialised
+
+for (let i = 0; i < N; i++) {
+  const i3 = i * 3;
+  if (isYin(denseGrid[i3], denseGrid[i3 + 1])) {
+    pos[i3]     = denseGrid[i3];
+    pos[i3 + 1] = denseGrid[i3 + 1];
+    pos[i3 + 2] = denseGrid[i3 + 2];
+  } else {
+    pos[i3]     = sparseAssign[i3];
+    pos[i3 + 1] = sparseAssign[i3 + 1];
+    pos[i3 + 2] = sparseAssign[i3 + 2];
   }
-  return best;
 }
-
-function generateShadowParticles(numCandidates, bandWidth) {
-  const arr = [];
-  const phi = Math.PI * (3 - Math.sqrt(5));
-  for (let i = 0; i < numCandidates; i++) {
-    const y = 1 - (i / (numCandidates - 1)) * 2;
-    const r = Math.sqrt(Math.max(0, 1 - y * y));
-    const th = phi * i;
-    const x = Math.cos(th) * r, z = Math.sin(th) * r;
-    if (isYin(x, y)) continue;
-    const d = nearestYinDist(x, y, bandWidth);
-    if (d > bandWidth) continue;
-    const t = 1 - d / bandWidth;
-    if (Math.random() < t * t * t * t) arr.push(x, y, z);
-  }
-  return new Float32Array(arr);
-}
-
-// ── Generate home positions (fixed in yin-yang frame) ─────────────────────
-const yinHome    = generateParticles(120000);
-const yangHome   = generateYangParticles(1800);
-const shadowHome = generateShadowParticles(80000, 0.2);
-
-// Live positions start equal to homes; velocities start at zero
-const yinPos    = new Float32Array(yinHome);
-const yangPos   = new Float32Array(yangHome);
-const shadowPos = new Float32Array(shadowHome);
-const yinVel    = new Float32Array(yinHome.length);
-const yangVel   = new Float32Array(yangHome.length);
-const shadowVel = new Float32Array(shadowHome.length);
 
 // ── Sprite texture ─────────────────────────────────────────────────────────
 function makeCircleTexture(r, g, b) {
@@ -132,91 +122,78 @@ function makeCircleTexture(r, g, b) {
   return new THREE.CanvasTexture(c);
 }
 
-// ── BufferGeometry for each system ─────────────────────────────────────────
-const yinGeo = new THREE.BufferGeometry();
-yinGeo.setAttribute('position', new THREE.BufferAttribute(yinPos, 3));
+// ── Geometry + material ────────────────────────────────────────────────────
+const geo = new THREE.BufferGeometry();
+geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
 
-const yangGeo = new THREE.BufferGeometry();
-yangGeo.setAttribute('position', new THREE.BufferAttribute(yangPos, 3));
-
-const shadowGeo = new THREE.BufferGeometry();
-shadowGeo.setAttribute('position', new THREE.BufferAttribute(shadowPos, 3));
-
-// ── Materials ──────────────────────────────────────────────────────────────
-const yinMat = new THREE.PointsMaterial({
-  size: 1.0 * window.devicePixelRatio, sizeAttenuation: false,
-  map: makeCircleTexture(0, 0, 0), color: 0x000000,
-  transparent: true, depthWrite: false, alphaTest: 0.01,
-});
-const yangMat = new THREE.PointsMaterial({
-  size: 1.2 * window.devicePixelRatio, sizeAttenuation: false,
-  map: makeCircleTexture(160, 160, 160), color: 0xa0a0a0,
-  transparent: true, depthWrite: false, alphaTest: 0.01,
-});
-const shadowMat = new THREE.PointsMaterial({
-  size: 1.0 * window.devicePixelRatio, sizeAttenuation: false,
-  map: makeCircleTexture(0, 0, 0), color: 0x000000,
-  transparent: true, depthWrite: false, alphaTest: 0.01,
-});
-
-// ── Add to group ───────────────────────────────────────────────────────────
-group.add(new THREE.Points(yangGeo,   yangMat));
-group.add(new THREE.Points(shadowGeo, shadowMat));
-group.add(new THREE.Points(yinGeo,    yinMat));
-
-// ── Systems array (used by physics loop) ──────────────────────────────────
-const systems = [
-  { pos: yinPos,    home: yinHome,    vel: yinVel,    geo: yinGeo    },
-  { pos: yangPos,   home: yangHome,   vel: yangVel,   geo: yangGeo   },
-  { pos: shadowPos, home: shadowHome, vel: shadowVel, geo: shadowGeo },
-];
+group.add(new THREE.Points(geo, new THREE.PointsMaterial({
+  size: 1.0 * window.devicePixelRatio,
+  sizeAttenuation: false,
+  map: makeCircleTexture(0, 0, 0),
+  color: 0x000000,
+  transparent: true,
+  depthWrite: false,
+  alphaTest: 0.01,
+})));
 
 // ── Physics constants ──────────────────────────────────────────────────────
-const K_SPRING   = 0.012;
+const K_SPRING   = 0.008;  // transition band ~10° wide at SPIN_SPEED
 const DAMPING    = 0.88;
 const SPIN_SPEED = 0.004;
 
-// ── Physics step ───────────────────────────────────────────────────────────
-function physicsStep(sys, theta) {
+// ── Physics step ──────────────────────────────────────────────────────────
+function physicsStep(theta) {
   const cosT = Math.cos(theta);
   const sinT = Math.sin(theta);
-  for (const { pos, home, vel, geo } of sys) {
-    const N = pos.length / 3;
-    for (let i = 0; i < N; i++) {
-      const i3 = i * 3;
-      // Rotate home around Z by theta
-      const hx = home[i3]     * cosT - home[i3 + 1] * sinT;
-      const hy = home[i3]     * sinT + home[i3 + 1] * cosT;
-      const hz = home[i3 + 2];
-      // Spring toward rotated home
-      vel[i3]     += K_SPRING * (hx - pos[i3]);
-      vel[i3 + 1] += K_SPRING * (hy - pos[i3 + 1]);
-      vel[i3 + 2] += K_SPRING * (hz - pos[i3 + 2]);
-      // Tangent project: remove radial component from vel
-      const radial = vel[i3] * pos[i3] + vel[i3 + 1] * pos[i3 + 1] + vel[i3 + 2] * pos[i3 + 2];
-      vel[i3]     -= radial * pos[i3];
-      vel[i3 + 1] -= radial * pos[i3 + 1];
-      vel[i3 + 2] -= radial * pos[i3 + 2];
-      // Integrate
-      pos[i3]     += vel[i3];
-      pos[i3 + 1] += vel[i3 + 1];
-      pos[i3 + 2] += vel[i3 + 2];
-      // Surface project (normalize; guard against zero-length)
-      const len = Math.sqrt(pos[i3] * pos[i3] + pos[i3 + 1] * pos[i3 + 1] + pos[i3 + 2] * pos[i3 + 2]);
-      if (len < 1e-6) continue;
-      pos[i3]     /= len;
-      pos[i3 + 1] /= len;
-      pos[i3 + 2] /= len;
-      // Damping
-      vel[i3]     *= DAMPING;
-      vel[i3 + 1] *= DAMPING;
-      vel[i3 + 2] *= DAMPING;
-    }
-    geo.attributes.position.needsUpdate = true;
+
+  for (let i = 0; i < N; i++) {
+    const i3 = i * 3;
+
+    // De-rotate world position into body frame: body = R(-theta) * world
+    const bx =  pos[i3]     * cosT + pos[i3 + 1] * sinT;
+    const by = -pos[i3]     * sinT + pos[i3 + 1] * cosT;
+
+    // Classify in the rotating yin-yang field
+    const inYin = isYin(bx, by);
+
+    // Choose fixed world-frame home
+    const hx = inYin ? denseGrid[i3]       : sparseAssign[i3];
+    const hy = inYin ? denseGrid[i3 + 1]   : sparseAssign[i3 + 1];
+    const hz = inYin ? denseGrid[i3 + 2]   : sparseAssign[i3 + 2];
+
+    // Spring toward home
+    vel[i3]     += K_SPRING * (hx - pos[i3]);
+    vel[i3 + 1] += K_SPRING * (hy - pos[i3 + 1]);
+    vel[i3 + 2] += K_SPRING * (hz - pos[i3 + 2]);
+
+    // Tangent project: remove radial component from velocity
+    const rad = vel[i3] * pos[i3] + vel[i3 + 1] * pos[i3 + 1] + vel[i3 + 2] * pos[i3 + 2];
+    vel[i3]     -= rad * pos[i3];
+    vel[i3 + 1] -= rad * pos[i3 + 1];
+    vel[i3 + 2] -= rad * pos[i3 + 2];
+
+    // Integrate
+    pos[i3]     += vel[i3];
+    pos[i3 + 1] += vel[i3 + 1];
+    pos[i3 + 2] += vel[i3 + 2];
+
+    // Surface project
+    const len = Math.sqrt(pos[i3]*pos[i3] + pos[i3+1]*pos[i3+1] + pos[i3+2]*pos[i3+2]);
+    if (len < 1e-6) continue;
+    pos[i3]     /= len;
+    pos[i3 + 1] /= len;
+    pos[i3 + 2] /= len;
+
+    // Damping
+    vel[i3]     *= DAMPING;
+    vel[i3 + 1] *= DAMPING;
+    vel[i3 + 2] *= DAMPING;
   }
+
+  geo.attributes.position.needsUpdate = true;
 }
 
-// ── Hover-to-pause (smootherstep ease-in-out, 3s) ─────────────────────────
+// ── Hover-to-pause (smootherstep ease-in-out, 3 s) ────────────────────────
 function smootherstep(t) {
   t = Math.max(0, Math.min(1, t));
   return t * t * t * (t * (t * 6 - 15) + 10);
@@ -251,6 +228,7 @@ window.addEventListener('mousemove', e => {
   hovering = raycaster.intersectObject(innerSphere).length > 0;
 
   if (!dragging) return;
+  if (lastX === null) { lastX = e.clientX; lastY = e.clientY; return; }
   const dx = e.clientX - lastX;
   const dy = e.clientY - lastY;
   lastX = e.clientX;
@@ -281,7 +259,7 @@ function animate() {
   wasHovering = hovering;
 
   theta -= rotSpeed;
-  physicsStep(systems, theta);
+  physicsStep(theta);
   renderer.render(scene, camera);
 }
 
