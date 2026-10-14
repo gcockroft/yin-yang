@@ -78,7 +78,7 @@ function makeFibGrid(count) {
 // the particle never has to cross the sphere when switching states.
 //
 // The YIN/YANG FIELD rotates (theta).  Each frame, the particle's
-// world position is de-rotated into the body frame and classified.
+// fixed dense home is de-rotated into the body frame and classified.
 // Inside the fish → spring toward dense home (cluster together → dark).
 // Outside the fish → spring toward sparse home (spread apart → light).
 // Absorption/release appears at the boundary as particles physically
@@ -163,12 +163,15 @@ function physicsStep(theta) {
   for (let i = 0; i < N; i++) {
     const i3 = i * 3;
 
-    // De-rotate world position into body frame: body = R(-theta) * world
-    const bx =  pos[i3]     * cosT + pos[i3 + 1] * sinT;
-    const by = -pos[i3]     * sinT + pos[i3 + 1] * cosT;
-
-    // Classify in the rotating yin-yang field
-    const inYin = isYinSphere(bx, by, pos[i3 + 2]);
+    // Classify the particle's fixed dense home, not its current position.
+    // Classifying the moving position is a feedback loop: a particle near
+    // the boundary springs toward its home, crosses the boundary, flips
+    // home, and turns back — jittering forever even when the field is still.
+    // De-rotate into the body frame: body = R(-theta) * world
+    const dx = denseGrid[i3], dy = denseGrid[i3 + 1], dz = denseGrid[i3 + 2];
+    const bx =  dx * cosT + dy * sinT;
+    const by = -dx * sinT + dy * cosT;
+    const inYin = isYinSphere(bx, by, dz);
 
     // Choose fixed world-frame home
     const hx = inYin ? denseGrid[i3]       : sparseAssign[i3];
