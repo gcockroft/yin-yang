@@ -72,9 +72,8 @@ function makeFibGrid(count) {
 // Dense grid  — one home per particle, tight spacing.
 // Sparse grid — far fewer points (~N/M per sparse home), wide spacing.
 //
-// Each particle has both a dense home and a sparse home: the sparse point
-// nearest its dense home, so switching states is a short local hop and a
-// sparse home is only occupied when the dense homes around it are yang.
+// Each particle has both a dense home and a sparse home a short hop away
+// (see sparse assignment below), so switching states is a local move.
 //
 // The YIN/YANG FIELD rotates (theta).  Each frame, the particle's
 // fixed dense home is de-rotated into the body frame and classified.
@@ -83,30 +82,65 @@ function makeFibGrid(count) {
 // Absorption/release appears at the boundary as particles physically
 // flow between the two states.
 //
-// Tunable from the URL, e.g. v2.html?dense=80000&sparse=1500
+// Tunable from the URL, e.g. v2.html?dense=80000&sparse=1500&reach=10
 const params = new URLSearchParams(location.search);
 const N = Number(params.get('dense'))  || 70000;  // total particles = size of dense grid
 const M = Number(params.get('sparse')) || 1800;   // size of sparse grid (~N/M particles per sparse home)
+const REACH_DEG = params.has('reach') ? Number(params.get('reach')) : 10;  // typical hop between homes, degrees
 
 const denseGrid  = makeFibGrid(N);
 const sparseGrid = makeFibGrid(M);
 
-// Nearest-sparse assignment. On a Fibonacci grid y falls linearly with
-// index, and the nearest sparse point is within a couple of grid spacings,
-// so only sparse indices in a narrow latitude band need checking.
+// Sparse assignment. Each particle's sparse home is the sparse point
+// nearest a random spot near its dense home, so the hop between homes has
+// a typical length of REACH_DEG. Sparse homes within about that distance
+// of the yin boundary are partly populated, so the two sides melt into
+// each other there; deeper inside the yin they are empty at rest.
+// Seeded, so the layout is the same on every load.
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 const sparseAssign = new Float32Array(N * 3);
 {
-  const band = 3 * Math.sqrt(4 * Math.PI / M);  // generous search radius in y
+  const rand = mulberry32(1);
+  // Uniform scatter over a spherical cap: median offset = radius / √2.
+  const capRadius = REACH_DEG * Math.SQRT2 * Math.PI / 180;
+  // On a Fibonacci grid y falls linearly with index, and the nearest sparse
+  // point is within a couple of grid spacings, so only sparse indices in a
+  // narrow latitude band need checking.
+  const band = 3 * Math.sqrt(4 * Math.PI / M);
   for (let i = 0; i < N; i++) {
     const i3 = i * 3;
-    const x = denseGrid[i3], y = denseGrid[i3 + 1], z = denseGrid[i3 + 2];
+    const px = denseGrid[i3], py = denseGrid[i3 + 1], pz = denseGrid[i3 + 2];
+
+    // Tangent basis at p (avoid the pole when crossing with +Y)
+    let ux = -pz, uy = 0, uz = px;                       // p × (0,1,0) up to sign
+    let ul = Math.hypot(ux, uz);
+    if (ul < 1e-6) { ux = 0; uy = pz; uz = -py; ul = Math.hypot(uy, uz); }  // p × (1,0,0)
+    ux /= ul; uy /= ul; uz /= ul;
+    const vx = py * uz - pz * uy, vy = pz * ux - px * uz, vz = px * uy - py * ux;
+
+    // Random point on the cap around p
+    const d = capRadius * Math.sqrt(rand());
+    const a = 2 * Math.PI * rand();
+    const ca = Math.cos(a), sa = Math.sin(a), sd = Math.sin(d), cd = Math.cos(d);
+    const x = px * cd + (ux * ca + vx * sa) * sd;
+    const y = py * cd + (uy * ca + vy * sa) * sd;
+    const z = pz * cd + (uz * ca + vz * sa) * sd;
+
     const jLo = Math.max(0,     Math.floor((1 - (y + band)) / 2 * (M - 1)));
     const jHi = Math.min(M - 1, Math.ceil ((1 - (y - band)) / 2 * (M - 1)));
     let best = -1, bestDot = -2;
     for (let j = jLo; j <= jHi; j++) {
       const j3 = j * 3;
-      const d = x * sparseGrid[j3] + y * sparseGrid[j3 + 1] + z * sparseGrid[j3 + 2];
-      if (d > bestDot) { bestDot = d; best = j3; }
+      const dot = x * sparseGrid[j3] + y * sparseGrid[j3 + 1] + z * sparseGrid[j3 + 2];
+      if (dot > bestDot) { bestDot = dot; best = j3; }
     }
     sparseAssign[i3]     = sparseGrid[best];
     sparseAssign[i3 + 1] = sparseGrid[best + 1];
