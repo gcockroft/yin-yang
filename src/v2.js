@@ -70,12 +70,11 @@ function makeFibGrid(count) {
 // ── Two grids covering the whole sphere ───────────────────────────────────
 //
 // Dense grid  — one home per particle, tight spacing.
-// Sparse grid — ~28× fewer points, wide spacing.
+// Sparse grid — far fewer points (~N/M per sparse home), wide spacing.
 //
-// Each particle has both a dense home and a sparse home.
-// The sparse home is assigned by index correspondence (same spiral,
-// different density), so the two homes are geographically close —
-// the particle never has to cross the sphere when switching states.
+// Each particle has both a dense home and a sparse home: the sparse point
+// nearest its dense home, so switching states is a short local hop and a
+// sparse home is only occupied when the dense homes around it are yang.
 //
 // The YIN/YANG FIELD rotates (theta).  Each frame, the particle's
 // fixed dense home is de-rotated into the body frame and classified.
@@ -84,19 +83,35 @@ function makeFibGrid(count) {
 // Absorption/release appears at the boundary as particles physically
 // flow between the two states.
 //
-const N = 50000;   // total particles = size of dense grid
-const M = 1800;    // size of sparse grid  (~28 particles per sparse home)
+// Tunable from the URL, e.g. v2.html?dense=80000&sparse=1500
+const params = new URLSearchParams(location.search);
+const N = Number(params.get('dense'))  || 70000;  // total particles = size of dense grid
+const M = Number(params.get('sparse')) || 1800;   // size of sparse grid (~N/M particles per sparse home)
 
 const denseGrid  = makeFibGrid(N);
 const sparseGrid = makeFibGrid(M);
 
-// Index-based sparse assignment: particle i → sparseGrid[round(i * M/N)]
+// Nearest-sparse assignment. On a Fibonacci grid y falls linearly with
+// index, and the nearest sparse point is within a couple of grid spacings,
+// so only sparse indices in a narrow latitude band need checking.
 const sparseAssign = new Float32Array(N * 3);
-for (let i = 0; i < N; i++) {
-  const j = Math.min(Math.round(i * M / N), M - 1) * 3;
-  sparseAssign[i * 3]     = sparseGrid[j];
-  sparseAssign[i * 3 + 1] = sparseGrid[j + 1];
-  sparseAssign[i * 3 + 2] = sparseGrid[j + 2];
+{
+  const band = 3 * Math.sqrt(4 * Math.PI / M);  // generous search radius in y
+  for (let i = 0; i < N; i++) {
+    const i3 = i * 3;
+    const x = denseGrid[i3], y = denseGrid[i3 + 1], z = denseGrid[i3 + 2];
+    const jLo = Math.max(0,     Math.floor((1 - (y + band)) / 2 * (M - 1)));
+    const jHi = Math.min(M - 1, Math.ceil ((1 - (y - band)) / 2 * (M - 1)));
+    let best = -1, bestDot = -2;
+    for (let j = jLo; j <= jHi; j++) {
+      const j3 = j * 3;
+      const d = x * sparseGrid[j3] + y * sparseGrid[j3 + 1] + z * sparseGrid[j3 + 2];
+      if (d > bestDot) { bestDot = d; best = j3; }
+    }
+    sparseAssign[i3]     = sparseGrid[best];
+    sparseAssign[i3 + 1] = sparseGrid[best + 1];
+    sparseAssign[i3 + 2] = sparseGrid[best + 2];
+  }
 }
 
 // ── Initial positions: correct home for theta = 0 ─────────────────────────
