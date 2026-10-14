@@ -43,11 +43,13 @@ function isYin(px, py) {
   }
 }
 
-// Back hemisphere (z < 0) is mirrored across the YZ plane, so the pattern
-// seen from behind reads the same as from the front and each fish's tail
-// wraps over the rim into the back.
+// Back hemisphere (z < 0) is the front pattern flipped top-to-bottom, i.e.
+// the front turned 180° about the X axis. Seen from behind it is a proper
+// (non-mirrored) yin-yang, and because the outer rim of the 2D symbol is
+// symmetric top-to-bottom, the two halves meet seamlessly at z = 0: each
+// fish's tail runs over the rim and becomes its head on the back.
 function isYinSphere(px, py, pz) {
-  return isYin(pz < 0 ? -px : px, py);
+  return isYin(px, pz < 0 ? -py : py);
 }
 
 // ── Full-sphere Fibonacci grid ─────────────────────────────────────────────

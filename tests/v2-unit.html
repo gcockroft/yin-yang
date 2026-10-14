@@ -49,13 +49,26 @@ assert(isYin(-0.5, -0.5) === false,  'bottom-left outer wing → yang');
 assert(isYin(0.01, 0.5) === true,    'just right of top seed → yin (dark seed override)');
 
 function isYinSphere(px, py, pz) {
-  return isYin(pz < 0 ? -px : px, py);
+  return isYin(px, pz < 0 ? -py : py);
 }
 
-assert(isYinSphere(0.5, 0.5, 0.5) === true,    'front: top-right outer wing → yin');
-assert(isYinSphere(0.5, 0.5, -0.5) === false,  'back: top-right mirrors to top-left → yang');
-assert(isYinSphere(-0.5, 0.5, -0.5) === true,  'back: top-left mirrors to top-right → yin');
-assert(isYinSphere(0.3, -0.5, -0.8) === true,  'back: yin fish head (beside seed) → yin');
+assert(isYinSphere(0.5, 0.5, 0.5) === true,     'front: top-right outer wing → yin');
+assert(isYinSphere(-0.5, 0.5, 0.5) === false,   'front: top-left outer wing → yang');
+assert(isYinSphere(0.3, 0.5, -0.8) === true,    'back: top flips to bottom → yin fish head');
+assert(isYinSphere(-0.3, -0.5, -0.8) === false, 'back: bottom flips to top → yang fish head');
+
+// Seamless rim: on z = 0 the front and back classifications must agree.
+// (The fish heads touch the rim tangentially at the top and bottom tips, so
+// sample just inside the rim — any mismatch there shrinks to a single point.)
+{
+  let mismatches = 0;
+  for (let k = 0; k < 360; k++) {
+    const a = (k + 0.5) * Math.PI / 180;
+    const x = Math.cos(a) * 0.99999, y = Math.sin(a) * 0.99999;
+    if (isYinSphere(x, y, 1e-6) !== isYinSphere(x, y, -1e-6)) mismatches++;
+  }
+  assert(mismatches === 0, `rim seam: front/back agree all around z = 0 (${mismatches} mismatches)`);
+}
 
 // ── Rotation math tests ───────────────────────────────────────────────────
 function rotateZ(x, y, theta) {
