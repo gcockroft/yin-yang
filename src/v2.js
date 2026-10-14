@@ -75,7 +75,7 @@ function makeFibGrid(count) {
 // Each particle has both a dense home and a sparse home a short hop away
 // (see sparse assignment below), so switching states is a local move.
 //
-// The YIN/YANG FIELD rotates (theta).  Each frame, the particle's
+// The YIN/YANG FIELD rotates (orientation `field`).  Each frame, the particle's
 // fixed dense home is de-rotated into the body frame and classified.
 // Inside the fish → spring toward dense home (cluster together → dark).
 // Outside the fish → spring toward sparse home (spread apart → light).
@@ -93,7 +93,9 @@ const settings = {
   reach:   num('reach',   5),      // typical hop between homes, degrees
   spring:  num('spring',  0.008),  // spring constant toward the current home
   damping: num('damping', 0.88),   // velocity kept each frame
-  spin:    num('spin',    0.004),  // field rotation, radians per frame
+  spin:    num('spin',    0.004),  // primary spin about the field's own axis, radians per frame
+  spin2:   num('spin2',   0),      // secondary spin about the tilted world axis, radians per frame
+  tilt:    num('tilt',    90),     // secondary axis, degrees from Z toward Y
 };
 
 let N, M, denseGrid, sparseGrid, sparseAssign, pos, vel;
@@ -155,13 +157,45 @@ function assignSparseHomes() {
   }
 }
 
-// Put every particle at its correct home for field angle theta, at rest.
-function placeParticlesAtHome(theta) {
-  const cosT = Math.cos(theta), sinT = Math.sin(theta);
+// ── Field orientation ─────────────────────────────────────────────────────
+// The yin-yang field's orientation is a quaternion, advanced each frame by
+//   primary   — spin about the field's own polar axis (body Z), and
+//   secondary — spin about a fixed world axis tilted settings.tilt
+//               degrees from Z toward Y (0° = same as Z, 90° = vertical Y).
+// Two incommensurate spins make the fish wander over the whole sphere.
+const field  = new THREE.Quaternion();
+const fieldM = new THREE.Matrix4();
+const qStep  = new THREE.Quaternion();
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const secondaryAxis = new THREE.Vector3();
+
+function advanceField(primaryAngle, secondaryAngle) {
+  qStep.setFromAxisAngle(Z_AXIS, -primaryAngle);
+  field.multiply(qStep);                       // about body Z
+  const tilt = settings.tilt * Math.PI / 180;
+  secondaryAxis.set(0, Math.sin(tilt), Math.cos(tilt));
+  qStep.setFromAxisAngle(secondaryAxis, -secondaryAngle);
+  field.premultiply(qStep);                    // about the world axis
+  field.normalize();
+}
+
+// Body-frame axes of the field in world coordinates (rows of R^T):
+// body = R^T · world, so body.x = col0 · p, etc.
+function fieldAxes() {
+  fieldM.makeRotationFromQuaternion(field);
+  return fieldM.elements;  // column-major: col0 = e[0..2], col1 = e[4..6], col2 = e[8..10]
+}
+
+// Put every particle at its correct home for the current field, at rest.
+function placeParticlesAtHome() {
+  const e = fieldAxes();
   for (let i = 0; i < N; i++) {
     const i3 = i * 3;
     const dx = denseGrid[i3], dy = denseGrid[i3 + 1], dz = denseGrid[i3 + 2];
-    const inYin = isYinSphere(dx * cosT + dy * sinT, -dx * sinT + dy * cosT, dz);
+    const inYin = isYinSphere(
+      e[0] * dx + e[1] * dy + e[2]  * dz,
+      e[4] * dx + e[5] * dy + e[6]  * dz,
+      e[8] * dx + e[9] * dy + e[10] * dz);
     const src = inYin ? denseGrid : sparseAssign;
     pos[i3]     = src[i3];
     pos[i3 + 1] = src[i3 + 1];
@@ -198,8 +232,8 @@ const points = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMate
 points.frustumCulled = false;  // always on the unit sphere; skip bounds upkeep
 group.add(points);
 
-// (Re)build grids, homes and particles from settings, keeping the field angle.
-function rebuild(theta) {
+// (Re)build grids, homes and particles from settings, keeping the field orientation.
+function rebuild() {
   N = Math.round(settings.dense);
   M = Math.round(settings.sparse);
   denseGrid  = makeFibGrid(N);
@@ -207,7 +241,7 @@ function rebuild(theta) {
   assignSparseHomes();
   pos = new Float32Array(N * 3);
   vel = new Float32Array(N * 3);
-  placeParticlesAtHome(theta);
+  placeParticlesAtHome();
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -215,12 +249,11 @@ function rebuild(theta) {
   points.geometry = geo;
 }
 
-rebuild(0);
+rebuild();
 
 // ── Physics step ──────────────────────────────────────────────────────────
-function physicsStep(theta) {
-  const cosT = Math.cos(theta);
-  const sinT = Math.sin(theta);
+function physicsStep() {
+  const e = fieldAxes();
   const K_SPRING = settings.spring;
   const DAMPING  = settings.damping;
 
@@ -231,11 +264,12 @@ function physicsStep(theta) {
     // Classifying the moving position is a feedback loop: a particle near
     // the boundary springs toward its home, crosses the boundary, flips
     // home, and turns back — jittering forever even when the field is still.
-    // De-rotate into the body frame: body = R(-theta) * world
+    // Rotate into the field's body frame: body = R^T * world
     const dx = denseGrid[i3], dy = denseGrid[i3 + 1], dz = denseGrid[i3 + 2];
-    const bx =  dx * cosT + dy * sinT;
-    const by = -dx * sinT + dy * cosT;
-    const inYin = isYinSphere(bx, by, dz);
+    const inYin = isYinSphere(
+      e[0] * dx + e[1] * dy + e[2]  * dz,
+      e[4] * dx + e[5] * dy + e[6]  * dz,
+      e[8] * dx + e[9] * dy + e[10] * dz);
 
     // Choose fixed world-frame home
     const hx = inYin ? denseGrid[i3]       : sparseAssign[i3];
@@ -281,11 +315,11 @@ function smootherstep(t) {
 }
 
 const HOVER_DURATION  = 3.0;
-let rotSpeed          = settings.spin;
+let motion            = 1;  // 0 = stopped, 1 = full speed (both spins)
 let hovering          = false;
 let wasHovering       = false;
 let hoverTime         = 0;
-let speedAtHoverStart = settings.spin;
+let motionAtHoverStart = 1;
 
 const raycaster = new THREE.Raycaster();
 const mouse     = new THREE.Vector2();
@@ -319,7 +353,6 @@ window.addEventListener('mousemove', e => {
 });
 
 // ── Animation loop ─────────────────────────────────────────────────────────
-let theta = 0;
 
 // ── Controls: start/stop spin, reset rotation ─────────────────────────────
 let spinning = true;
@@ -332,24 +365,26 @@ spinBtn.addEventListener('click', () => {
   spinBtn.setAttribute('aria-pressed', String(!spinning));
 });
 
-// Back to the initial state: field angle 0, default view, particles at home.
+// Back to the initial state: field orientation, default view, particles at home.
 resetBtn.addEventListener('click', () => {
-  theta = 0;
+  field.identity();
   group.rotation.set(0, 0, 0);
-  placeParticlesAtHome(0);
+  placeParticlesAtHome();
   points.geometry.attributes.position.needsUpdate = true;
 });
 
 // ── Tune panel ─────────────────────────────────────────────────────────────
-// Spring, damping and spin apply instantly. Dense, sparse and reach rebuild
-// the particles (on release), keeping the current field angle.
+// Spring, damping, spins and axis tilt apply instantly. Dense, sparse and
+// reach rebuild the particles (on release), keeping the field orientation.
 const TUNERS = [
   { key: 'dense',   label: 'Dense dots',   min: 10000, max: 150000, step: 5000,   rebuild: true, fmt: v => v.toLocaleString() },
   { key: 'sparse',  label: 'Sparse spots', min: 200,   max: 6000,   step: 100,    rebuild: true, fmt: v => v.toLocaleString() },
   { key: 'reach',   label: 'Reach (°)',    min: 0,     max: 20,     step: 0.5,    rebuild: true, fmt: v => v.toFixed(1) },
   { key: 'spring',  label: 'Spring',       min: 0.001, max: 0.05,   step: 0.001,  fmt: v => v.toFixed(3) },
   { key: 'damping', label: 'Damping',      min: 0.5,   max: 0.99,   step: 0.01,   fmt: v => v.toFixed(2) },
-  { key: 'spin',    label: 'Spin speed',   min: 0,     max: 0.02,   step: 0.0005, fmt: v => v.toFixed(4) },
+  { key: 'spin',    label: 'Primary spin (own axis)', min: -0.02, max: 0.02, step: 0.0005, fmt: v => v.toFixed(4) },
+  { key: 'spin2',   label: 'Secondary spin',          min: -0.02, max: 0.02, step: 0.0005, fmt: v => v.toFixed(4) },
+  { key: 'tilt',    label: 'Secondary axis tilt (°)', min: 0,    max: 180,  step: 1,      fmt: v => v.toFixed(0) },
 ];
 
 const tunePanel   = document.getElementById('tune-panel');
@@ -377,7 +412,7 @@ for (const t of TUNERS) {
   if (t.rebuild) {
     input.addEventListener('change', () => {
       settings[t.key] = Number(input.value);
-      rebuild(theta);
+      rebuild();
       refreshSummary();
     });
   }
@@ -397,24 +432,24 @@ function animate() {
   const dt = clock.getDelta();
 
   if (!spinning) {
-    rotSpeed += (0 - rotSpeed) * 0.15;  // quick ease to a stop
-    if (rotSpeed < 1e-6) rotSpeed = 0;
+    motion += (0 - motion) * 0.15;  // quick ease to a stop
+    if (motion < 1e-4) motion = 0;
   } else if (hovering) {
     if (!wasHovering) {
-      speedAtHoverStart = rotSpeed;
+      motionAtHoverStart = motion;
       hoverTime = 0;
     }
     hoverTime += dt;
     const t = Math.min(hoverTime / HOVER_DURATION, 1.0);
-    rotSpeed = speedAtHoverStart * (1 - smootherstep(t));
+    motion = motionAtHoverStart * (1 - smootherstep(t));
   } else {
     hoverTime = 0;
-    rotSpeed += (settings.spin - rotSpeed) * 0.025;
+    motion += (1 - motion) * 0.025;
   }
   wasHovering = hovering;
 
-  theta -= rotSpeed;
-  physicsStep(theta);
+  advanceField(settings.spin * motion, settings.spin2 * motion);
+  physicsStep();
   renderer.render(scene, camera);
 }
 
