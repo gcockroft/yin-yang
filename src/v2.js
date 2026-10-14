@@ -43,6 +43,13 @@ function isYin(px, py) {
   }
 }
 
+// Back hemisphere (z < 0) is mirrored across the YZ plane, so the pattern
+// seen from behind reads the same as from the front and each fish's tail
+// wraps over the rim into the back.
+function isYinSphere(px, py, pz) {
+  return isYin(pz < 0 ? -px : px, py);
+}
+
 // ── Full-sphere Fibonacci grid ─────────────────────────────────────────────
 function makeFibGrid(count) {
   const arr = new Float32Array(count * 3);
@@ -96,7 +103,7 @@ const vel = new Float32Array(N * 3);  // zero-initialised
 
 for (let i = 0; i < N; i++) {
   const i3 = i * 3;
-  if (isYin(denseGrid[i3], denseGrid[i3 + 1])) {
+  if (isYinSphere(denseGrid[i3], denseGrid[i3 + 1], denseGrid[i3 + 2])) {
     pos[i3]     = denseGrid[i3];
     pos[i3 + 1] = denseGrid[i3 + 1];
     pos[i3 + 2] = denseGrid[i3 + 2];
@@ -154,7 +161,7 @@ function physicsStep(theta) {
     const by = -pos[i3]     * sinT + pos[i3 + 1] * cosT;
 
     // Classify in the rotating yin-yang field
-    const inYin = isYin(bx, by);
+    const inYin = isYinSphere(bx, by, pos[i3 + 2]);
 
     // Choose fixed world-frame home
     const hx = inYin ? denseGrid[i3]       : sparseAssign[i3];
