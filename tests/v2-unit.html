@@ -13,6 +13,8 @@
 <h2>v2 unit tests</h2>
 <div id="results"></div>
 <script type="module">
+import { isYin, isYinSphere, makeFibGrid, assignSparseHomes } from '../src/v2-core.js';
+
 const results = document.getElementById('results');
 let passed = 0, failed = 0;
 
@@ -24,34 +26,24 @@ function assert(condition, label) {
   condition ? passed++ : failed++;
 }
 
-// ── isYin tests ───────────────────────────────────────────────────────────
-function isYin(px, py) {
-  if (px * px + py * py > 1.0) return false;
-  const seedR2 = 0.0324;
-  if (px * px + (py - 0.5) * (py - 0.5) < seedR2) return true;
-  if (px * px + (py + 0.5) * (py + 0.5) < seedR2) return false;
-  if (py >= 0) {
-    if (px * px + (py - 0.5) * (py - 0.5) < 0.25) return false;
-    return px > 0;
-  } else {
-    if (px * px + (py + 0.5) * (py + 0.5) < 0.25) return true;
-    return px > 0;
-  }
-}
+const deg = rad => rad * 180 / Math.PI;
+const angle = (a, i, b, j) => deg(Math.acos(Math.max(-1, Math.min(1,
+  a[i] * b[j] + a[i + 1] * b[j + 1] + a[i + 2] * b[j + 2]))));
+const median = xs => { const s = [...xs].sort((p, q) => p - q); return s[Math.floor(s.length / 2)]; };
 
+// ── isYin tests ───────────────────────────────────────────────────────────
 assert(isYin(2, 0) === false,        'outside unit circle → false');
 assert(isYin(0.5, 0.5) === true,     'top-right outer wing → yin');
 assert(isYin(-0.5, 0.5) === false,   'top-left outer wing → yang');
-assert(isYin(0, 0.5) === false,      'top center (yang fish head) → yang');
-assert(isYin(0, -0.5) === true,      'bottom center (yin fish head) → yin');
+assert(isYin(0, 0.3) === false,      'top fish head, beside the seed → yang');
+assert(isYin(0, -0.3) === true,      'bottom fish head, beside the seed → yin');
+assert(isYin(0, 0.5) === true,       'top seed centre → yin (dark seed in the yang head)');
+assert(isYin(0, -0.5) === false,     'bottom seed centre → yang (light seed in the yin head)');
 assert(isYin(0.5, -0.5) === true,    'bottom-right outer wing → yin');
 assert(isYin(-0.5, -0.5) === false,  'bottom-left outer wing → yang');
 assert(isYin(0.01, 0.5) === true,    'just right of top seed → yin (dark seed override)');
 
-function isYinSphere(px, py, pz) {
-  return isYin(px, pz < 0 ? -py : py);
-}
-
+// ── isYinSphere: back hemisphere is the front flipped top-to-bottom ───────
 assert(isYinSphere(0.5, 0.5, 0.5) === true,     'front: top-right outer wing → yin');
 assert(isYinSphere(-0.5, 0.5, 0.5) === false,   'front: top-left outer wing → yang');
 assert(isYinSphere(0.3, 0.5, -0.8) === true,    'back: top flips to bottom → yin fish head');
@@ -70,22 +62,91 @@ assert(isYinSphere(-0.3, -0.5, -0.8) === false, 'back: bottom flips to top → y
   assert(mismatches === 0, `rim seam: front/back agree all around z = 0 (${mismatches} mismatches)`);
 }
 
-// ── Rotation math tests ───────────────────────────────────────────────────
-function rotateZ(x, y, theta) {
-  return [
-    x * Math.cos(theta) - y * Math.sin(theta),
-    x * Math.sin(theta) + y * Math.cos(theta),
-  ];
-}
+// ── Fibonacci grid ─────────────────────────────────────────────────────────
 {
-  const [rx, ry] = rotateZ(1, 0, Math.PI / 2);
-  assert(Math.abs(rx) < 1e-10,     'rotateZ(1,0,π/2).x ≈ 0');
-  assert(Math.abs(ry - 1) < 1e-10, 'rotateZ(1,0,π/2).y ≈ 1');
+  const g = makeFibGrid(2000);
+  let worst = 0;
+  for (let i = 0; i < g.length; i += 3) worst = Math.max(worst, Math.abs(Math.hypot(g[i], g[i + 1], g[i + 2]) - 1));
+  assert(worst < 1e-6, `grid points lie on the unit sphere (worst error ${worst.toExponential(1)})`);
+  assert(g[1] === 1 && g[g.length - 2] === -1, 'grid runs from the north pole (y = 1) to the south pole (y = -1)');
 }
+
+// ── Sparse home assignment ─────────────────────────────────────────────────
+const dense  = makeFibGrid(20000);
+const sparse = makeFibGrid(1800);
+const N = dense.length / 3, M = sparse.length / 3;
+
+function hops(assign) {
+  const out = new Float64Array(N);
+  for (let i = 0; i < N; i++) out[i] = angle(dense, i * 3, assign, i * 3);
+  return out;
+}
+
 {
-  const [rx, ry] = rotateZ(0, 1, Math.PI / 2);
-  assert(Math.abs(rx + 1) < 1e-10, 'rotateZ(0,1,π/2).x ≈ -1');
-  assert(Math.abs(ry) < 1e-10,     'rotateZ(0,1,π/2).y ≈ 0');
+  // Reach 0 = nearest sparse point (checked against brute force on a sample)
+  const near = assignSparseHomes(dense, sparse, 0);
+  let wrong = 0;
+  for (let i = 0; i < N; i += 37) {
+    let best = -1, bestDot = -2;
+    for (let j = 0; j < M; j++) {
+      const d = dense[i * 3] * sparse[j * 3] + dense[i * 3 + 1] * sparse[j * 3 + 1] + dense[i * 3 + 2] * sparse[j * 3 + 2];
+      if (d > bestDot) { bestDot = d; best = j; }
+    }
+    if (near[i * 3] !== sparse[best * 3] || near[i * 3 + 1] !== sparse[best * 3 + 1] || near[i * 3 + 2] !== sparse[best * 3 + 2]) wrong++;
+  }
+  assert(wrong === 0, `reach 0: every particle gets its nearest sparse point (${wrong} wrong in sample)`);
+
+  // Regression: index-based assignment sent particles up to 180° away
+  const maxHop = Math.max(...hops(near));
+  assert(maxHop < 5, `reach 0: no long hops between homes (max ${maxHop.toFixed(1)}°)`);
+}
+
+{
+  // Every assigned home is exactly a sparse grid point
+  const assign = assignSparseHomes(dense, sparse, 5);
+  const keys = new Set();
+  for (let j = 0; j < M; j++) keys.add(`${sparse[j * 3]},${sparse[j * 3 + 1]},${sparse[j * 3 + 2]}`);
+  let off = 0;
+  for (let i = 0; i < N; i++) if (!keys.has(`${assign[i * 3]},${assign[i * 3 + 1]},${assign[i * 3 + 2]}`)) off++;
+  assert(off === 0, `reach 5: every sparse home is a sparse grid point (${off} off-grid)`);
+
+  // Seeded: same layout every time
+  const again = assignSparseHomes(dense, sparse, 5);
+  assert(assign.every((v, k) => v === again[k]), 'reach 5: assignment is the same on every run (seeded)');
+}
+
+for (const reach of [5, 10]) {
+  const m = median(hops(assignSparseHomes(dense, sparse, reach)));
+  assert(Math.abs(m - reach) < reach * 0.15, `reach ${reach}: median hop ≈ ${reach}° (got ${m.toFixed(1)}°)`);
+}
+
+{
+  // At rest, sparse homes deep inside the yin are empty: a sparse point is
+  // only occupied by particles whose dense home is yang, and those are all
+  // within the cap radius (reach·√2) plus a grid spacing of it.
+  const reach = 5;
+  const assign = assignSparseHomes(dense, sparse, reach);
+  const occupied = new Set();
+  for (let i = 0; i < N; i++) {
+    const i3 = i * 3;
+    if (!isYinSphere(dense[i3], dense[i3 + 1], dense[i3 + 2])) occupied.add(`${assign[i3]},${assign[i3 + 1]},${assign[i3 + 2]}`);
+  }
+  const cosLimit = Math.cos((reach * Math.SQRT2 + 2 * deg(Math.sqrt(4 * Math.PI / M))) * Math.PI / 180);
+  let deepOccupied = 0, deep = 0;
+  for (let j = 0; j < M; j++) {
+    const j3 = j * 3;
+    let nearYang = false;
+    for (let i = 0; i < N && !nearYang; i++) {
+      const i3 = i * 3;
+      const c = sparse[j3] * dense[i3] + sparse[j3 + 1] * dense[i3 + 1] + sparse[j3 + 2] * dense[i3 + 2];
+      if (c > cosLimit && !isYinSphere(dense[i3], dense[i3 + 1], dense[i3 + 2])) nearYang = true;
+    }
+    if (nearYang) continue;
+    deep++;
+    if (occupied.has(`${sparse[j3]},${sparse[j3 + 1]},${sparse[j3 + 2]}`)) deepOccupied++;
+  }
+  assert(deep > 100 && deepOccupied === 0,
+    `reach 5: sparse homes deep inside the yin are empty at rest (${deepOccupied} of ${deep} occupied)`);
 }
 
 // ── Surface project invariant ─────────────────────────────────────────────
@@ -97,24 +158,9 @@ function rotateZ(x, y, theta) {
   assert(Math.abs(lenAfter - 1) < 1e-6, 'surface project: |pos| = 1 after normalize');
 }
 
-// ── NaN guard test ────────────────────────────────────────────────────────
-{
-  const pos = new Float32Array([0, 0, 0]);
-  const len = Math.sqrt(pos[0]*pos[0] + pos[1]*pos[1] + pos[2]*pos[2]);
-  assert(len < 1e-6, 'NaN guard: zero-length pos detected (len < 1e-6)');
-}
-
-// ── Rotation direction test ───────────────────────────────────────────────
-// theta must decrease each frame (heads-lead, matching v1's group.rotation.z -= rotSpeed)
-{
-  const SPIN = 0.004;
-  let theta = 0;
-  theta -= SPIN;
-  assert(theta < 0, 'rotation direction: theta decreases per frame (heads-lead)');
-}
-
 // ── Summary ───────────────────────────────────────────────────────────────
 const summary = document.createElement('p');
+summary.id = 'summary';
 summary.textContent = `${passed} passed, ${failed} failed`;
 results.appendChild(summary);
 </script>
