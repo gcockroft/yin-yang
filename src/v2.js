@@ -86,7 +86,7 @@ function makeFibGrid(count) {
 const params = new URLSearchParams(location.search);
 const N = Number(params.get('dense'))  || 70000;  // total particles = size of dense grid
 const M = Number(params.get('sparse')) || 1800;   // size of sparse grid (~N/M particles per sparse home)
-const REACH_DEG = params.has('reach') ? Number(params.get('reach')) : 10;  // typical hop between homes, degrees
+const REACH_DEG = params.has('reach') ? Number(params.get('reach')) : 5;   // typical hop between homes, degrees
 
 const denseGrid  = makeFibGrid(N);
 const sparseGrid = makeFibGrid(M);
