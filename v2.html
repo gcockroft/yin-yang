@@ -8,19 +8,35 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #ffffff; overflow: hidden; }
     canvas { display: block; }
-    #controls { position: fixed; top: 16px; right: 16px; display: flex; gap: 8px; }
+    #controls { position: fixed; top: 16px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+    #buttons { display: flex; gap: 8px; }
     #controls button {
       font: 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       padding: 8px 14px; min-width: 64px; cursor: pointer;
       color: #000; background: #fff; border: 1px solid #000; border-radius: 6px;
     }
     #controls button:hover { background: #000; color: #fff; }
+    #tune-panel {
+      width: 260px; padding: 12px; background: rgba(255,255,255,0.92);
+      border: 1px solid #000; border-radius: 6px;
+      font: 12px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .tune-row { display: grid; grid-template-columns: 1fr auto; row-gap: 2px; margin-bottom: 10px; }
+    .tune-row output { font-variant-numeric: tabular-nums; }
+    .tune-row input { grid-column: 1 / -1; width: 100%; accent-color: #000; }
+    #tune-summary { font: 11px/1.4 ui-monospace, Menlo, monospace; word-break: break-all; color: #444; user-select: all; }
   </style>
 </head>
 <body>
 <div id="controls">
-  <button id="spin-toggle" type="button" aria-pressed="false">Stop</button>
-  <button id="rotation-reset" type="button">Reset</button>
+  <div id="buttons">
+    <button id="spin-toggle" type="button" aria-pressed="false">Stop</button>
+    <button id="rotation-reset" type="button">Reset</button>
+    <button id="tune-toggle" type="button" aria-expanded="false" aria-controls="tune-panel">Tune</button>
+  </div>
+  <div id="tune-panel" hidden>
+    <div id="tune-summary"></div>
+  </div>
 </div>
 <script type="importmap">
 {

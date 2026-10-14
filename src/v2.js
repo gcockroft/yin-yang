@@ -82,20 +82,27 @@ function makeFibGrid(count) {
 // Absorption/release appears at the boundary as particles physically
 // flow between the two states.
 //
-// Tunable from the URL, e.g. v2.html?dense=80000&sparse=1500&reach=10
+// All of these are tunable live from the Tune panel; the starting values
+// can also come from the URL, e.g. v2.html?dense=80000&sparse=1500&reach=10
 const params = new URLSearchParams(location.search);
-const N = Number(params.get('dense'))  || 70000;  // total particles = size of dense grid
-const M = Number(params.get('sparse')) || 1800;   // size of sparse grid (~N/M particles per sparse home)
-const REACH_DEG = params.has('reach') ? Number(params.get('reach')) : 5;   // typical hop between homes, degrees
+const num = (key, fallback) => (params.has(key) && params.get(key) !== '' && !isNaN(Number(params.get(key))))
+  ? Number(params.get(key)) : fallback;
+const settings = {
+  dense:   num('dense',   70000),  // total particles = size of dense grid
+  sparse:  num('sparse',  1800),   // size of sparse grid (~dense/sparse particles per sparse home)
+  reach:   num('reach',   5),      // typical hop between homes, degrees
+  spring:  num('spring',  0.008),  // spring constant toward the current home
+  damping: num('damping', 0.88),   // velocity kept each frame
+  spin:    num('spin',    0.004),  // field rotation, radians per frame
+};
 
-const denseGrid  = makeFibGrid(N);
-const sparseGrid = makeFibGrid(M);
+let N, M, denseGrid, sparseGrid, sparseAssign, pos, vel;
 
 // Sparse assignment. Each particle's sparse home is the sparse point
 // nearest a random spot near its dense home, so the hop between homes has
-// a typical length of REACH_DEG. Sparse homes within about that distance
-// of the yin boundary are partly populated, so the two sides melt into
-// each other there; deeper inside the yin they are empty at rest.
+// a typical length of settings.reach. Sparse homes within about that
+// distance of the yin boundary are partly populated, so the two sides melt
+// into each other there; deeper inside the yin they are empty at rest.
 // Seeded, so the layout is the same on every load.
 function mulberry32(seed) {
   return function () {
@@ -106,11 +113,11 @@ function mulberry32(seed) {
   };
 }
 
-const sparseAssign = new Float32Array(N * 3);
-{
+function assignSparseHomes() {
+  sparseAssign = new Float32Array(N * 3);
   const rand = mulberry32(1);
   // Uniform scatter over a spherical cap: median offset = radius / √2.
-  const capRadius = REACH_DEG * Math.SQRT2 * Math.PI / 180;
+  const capRadius = settings.reach * Math.SQRT2 * Math.PI / 180;
   // On a Fibonacci grid y falls linearly with index, and the nearest sparse
   // point is within a couple of grid spacings, so only sparse indices in a
   // narrow latitude band need checking.
@@ -148,27 +155,20 @@ const sparseAssign = new Float32Array(N * 3);
   }
 }
 
-// ── Initial positions: correct home for theta = 0 ─────────────────────────
-const pos = new Float32Array(N * 3);
-const vel = new Float32Array(N * 3);
-
-function placeParticlesAtHome() {
+// Put every particle at its correct home for field angle theta, at rest.
+function placeParticlesAtHome(theta) {
+  const cosT = Math.cos(theta), sinT = Math.sin(theta);
   for (let i = 0; i < N; i++) {
     const i3 = i * 3;
-    if (isYinSphere(denseGrid[i3], denseGrid[i3 + 1], denseGrid[i3 + 2])) {
-      pos[i3]     = denseGrid[i3];
-      pos[i3 + 1] = denseGrid[i3 + 1];
-      pos[i3 + 2] = denseGrid[i3 + 2];
-    } else {
-      pos[i3]     = sparseAssign[i3];
-      pos[i3 + 1] = sparseAssign[i3 + 1];
-      pos[i3 + 2] = sparseAssign[i3 + 2];
-    }
+    const dx = denseGrid[i3], dy = denseGrid[i3 + 1], dz = denseGrid[i3 + 2];
+    const inYin = isYinSphere(dx * cosT + dy * sinT, -dx * sinT + dy * cosT, dz);
+    const src = inYin ? denseGrid : sparseAssign;
+    pos[i3]     = src[i3];
+    pos[i3 + 1] = src[i3 + 1];
+    pos[i3 + 2] = src[i3 + 2];
   }
   vel.fill(0);
 }
-
-placeParticlesAtHome();
 
 // ── Sprite texture ─────────────────────────────────────────────────────────
 function makeCircleTexture(r, g, b) {
@@ -186,10 +186,7 @@ function makeCircleTexture(r, g, b) {
 }
 
 // ── Geometry + material ────────────────────────────────────────────────────
-const geo = new THREE.BufferGeometry();
-geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-
-group.add(new THREE.Points(geo, new THREE.PointsMaterial({
+const points = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({
   size: 1.0 * window.devicePixelRatio,
   sizeAttenuation: false,
   map: makeCircleTexture(0, 0, 0),
@@ -197,17 +194,35 @@ group.add(new THREE.Points(geo, new THREE.PointsMaterial({
   transparent: true,
   depthWrite: false,
   alphaTest: 0.01,
-})));
+}));
+points.frustumCulled = false;  // always on the unit sphere; skip bounds upkeep
+group.add(points);
 
-// ── Physics constants ──────────────────────────────────────────────────────
-const K_SPRING   = 0.008;  // transition band ~10° wide at SPIN_SPEED
-const DAMPING    = 0.88;
-const SPIN_SPEED = 0.004;
+// (Re)build grids, homes and particles from settings, keeping the field angle.
+function rebuild(theta) {
+  N = Math.round(settings.dense);
+  M = Math.round(settings.sparse);
+  denseGrid  = makeFibGrid(N);
+  sparseGrid = makeFibGrid(M);
+  assignSparseHomes();
+  pos = new Float32Array(N * 3);
+  vel = new Float32Array(N * 3);
+  placeParticlesAtHome(theta);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  points.geometry.dispose();
+  points.geometry = geo;
+}
+
+rebuild(0);
 
 // ── Physics step ──────────────────────────────────────────────────────────
 function physicsStep(theta) {
   const cosT = Math.cos(theta);
   const sinT = Math.sin(theta);
+  const K_SPRING = settings.spring;
+  const DAMPING  = settings.damping;
 
   for (let i = 0; i < N; i++) {
     const i3 = i * 3;
@@ -256,7 +271,7 @@ function physicsStep(theta) {
     vel[i3 + 2] *= DAMPING;
   }
 
-  geo.attributes.position.needsUpdate = true;
+  points.geometry.attributes.position.needsUpdate = true;
 }
 
 // ── Hover-to-pause (smootherstep ease-in-out, 3 s) ────────────────────────
@@ -266,11 +281,11 @@ function smootherstep(t) {
 }
 
 const HOVER_DURATION  = 3.0;
-let rotSpeed          = SPIN_SPEED;
+let rotSpeed          = settings.spin;
 let hovering          = false;
 let wasHovering       = false;
 let hoverTime         = 0;
-let speedAtHoverStart = SPIN_SPEED;
+let speedAtHoverStart = settings.spin;
 
 const raycaster = new THREE.Raycaster();
 const mouse     = new THREE.Vector2();
@@ -321,8 +336,60 @@ spinBtn.addEventListener('click', () => {
 resetBtn.addEventListener('click', () => {
   theta = 0;
   group.rotation.set(0, 0, 0);
-  placeParticlesAtHome();
-  geo.attributes.position.needsUpdate = true;
+  placeParticlesAtHome(0);
+  points.geometry.attributes.position.needsUpdate = true;
+});
+
+// ── Tune panel ─────────────────────────────────────────────────────────────
+// Spring, damping and spin apply instantly. Dense, sparse and reach rebuild
+// the particles (on release), keeping the current field angle.
+const TUNERS = [
+  { key: 'dense',   label: 'Dense dots',   min: 10000, max: 150000, step: 5000,   rebuild: true, fmt: v => v.toLocaleString() },
+  { key: 'sparse',  label: 'Sparse spots', min: 200,   max: 6000,   step: 100,    rebuild: true, fmt: v => v.toLocaleString() },
+  { key: 'reach',   label: 'Reach (°)',    min: 0,     max: 20,     step: 0.5,    rebuild: true, fmt: v => v.toFixed(1) },
+  { key: 'spring',  label: 'Spring',       min: 0.001, max: 0.05,   step: 0.001,  fmt: v => v.toFixed(3) },
+  { key: 'damping', label: 'Damping',      min: 0.5,   max: 0.99,   step: 0.01,   fmt: v => v.toFixed(2) },
+  { key: 'spin',    label: 'Spin speed',   min: 0,     max: 0.02,   step: 0.0005, fmt: v => v.toFixed(4) },
+];
+
+const tunePanel   = document.getElementById('tune-panel');
+const tuneToggle  = document.getElementById('tune-toggle');
+const tuneSummary = document.getElementById('tune-summary');
+
+function refreshSummary() {
+  tuneSummary.textContent = TUNERS.map(t => `${t.key}=${Number(settings[t.key].toFixed(4))}`).join('&');
+}
+
+for (const t of TUNERS) {
+  const row = document.createElement('label');
+  row.className = 'tune-row';
+  const name  = document.createElement('span');
+  name.textContent = t.label;
+  const value = document.createElement('output');
+  value.textContent = t.fmt(settings[t.key]);
+  const input = document.createElement('input');
+  Object.assign(input, { type: 'range', min: t.min, max: t.max, step: t.step, value: settings[t.key] });
+  input.addEventListener('input', () => {
+    const v = Number(input.value);
+    value.textContent = t.fmt(v);
+    if (!t.rebuild) { settings[t.key] = v; refreshSummary(); }
+  });
+  if (t.rebuild) {
+    input.addEventListener('change', () => {
+      settings[t.key] = Number(input.value);
+      rebuild(theta);
+      refreshSummary();
+    });
+  }
+  row.append(name, value, input);
+  tunePanel.insertBefore(row, tuneSummary);
+}
+refreshSummary();
+
+tuneToggle.addEventListener('click', () => {
+  const open = tunePanel.hidden;
+  tunePanel.hidden = !open;
+  tuneToggle.setAttribute('aria-expanded', String(open));
 });
 
 function animate() {
@@ -342,7 +409,7 @@ function animate() {
     rotSpeed = speedAtHoverStart * (1 - smootherstep(t));
   } else {
     hoverTime = 0;
-    rotSpeed += (SPIN_SPEED - rotSpeed) * 0.025;
+    rotSpeed += (settings.spin - rotSpeed) * 0.025;
   }
   wasHovering = hovering;
 
