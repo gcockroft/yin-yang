@@ -101,20 +101,25 @@ for (let i = 0; i < N; i++) {
 
 // ── Initial positions: correct home for theta = 0 ─────────────────────────
 const pos = new Float32Array(N * 3);
-const vel = new Float32Array(N * 3);  // zero-initialised
+const vel = new Float32Array(N * 3);
 
-for (let i = 0; i < N; i++) {
-  const i3 = i * 3;
-  if (isYinSphere(denseGrid[i3], denseGrid[i3 + 1], denseGrid[i3 + 2])) {
-    pos[i3]     = denseGrid[i3];
-    pos[i3 + 1] = denseGrid[i3 + 1];
-    pos[i3 + 2] = denseGrid[i3 + 2];
-  } else {
-    pos[i3]     = sparseAssign[i3];
-    pos[i3 + 1] = sparseAssign[i3 + 1];
-    pos[i3 + 2] = sparseAssign[i3 + 2];
+function placeParticlesAtHome() {
+  for (let i = 0; i < N; i++) {
+    const i3 = i * 3;
+    if (isYinSphere(denseGrid[i3], denseGrid[i3 + 1], denseGrid[i3 + 2])) {
+      pos[i3]     = denseGrid[i3];
+      pos[i3 + 1] = denseGrid[i3 + 1];
+      pos[i3 + 2] = denseGrid[i3 + 2];
+    } else {
+      pos[i3]     = sparseAssign[i3];
+      pos[i3 + 1] = sparseAssign[i3 + 1];
+      pos[i3 + 2] = sparseAssign[i3 + 2];
+    }
   }
+  vel.fill(0);
 }
+
+placeParticlesAtHome();
 
 // ── Sprite texture ─────────────────────────────────────────────────────────
 function makeCircleTexture(r, g, b) {
@@ -249,11 +254,33 @@ window.addEventListener('mousemove', e => {
 // ── Animation loop ─────────────────────────────────────────────────────────
 let theta = 0;
 
+// ── Controls: start/stop spin, reset rotation ─────────────────────────────
+let spinning = true;
+const spinBtn  = document.getElementById('spin-toggle');
+const resetBtn = document.getElementById('rotation-reset');
+
+spinBtn.addEventListener('click', () => {
+  spinning = !spinning;
+  spinBtn.textContent = spinning ? 'Stop' : 'Start';
+  spinBtn.setAttribute('aria-pressed', String(!spinning));
+});
+
+// Back to the initial state: field angle 0, default view, particles at home.
+resetBtn.addEventListener('click', () => {
+  theta = 0;
+  group.rotation.set(0, 0, 0);
+  placeParticlesAtHome();
+  geo.attributes.position.needsUpdate = true;
+});
+
 function animate() {
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
 
-  if (hovering) {
+  if (!spinning) {
+    rotSpeed += (0 - rotSpeed) * 0.15;  // quick ease to a stop
+    if (rotSpeed < 1e-6) rotSpeed = 0;
+  } else if (hovering) {
     if (!wasHovering) {
       speedAtHoverStart = rotSpeed;
       hoverTime = 0;
