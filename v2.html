@@ -21,9 +21,17 @@
       border: 1px solid #000; border-radius: 6px;
       font: 12px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    .tune-row { display: grid; grid-template-columns: 1fr auto; row-gap: 2px; margin-bottom: 10px; }
+    .tune-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; column-gap: 6px; row-gap: 2px; margin-bottom: 10px; }
+    #controls .tune-reset {
+      min-width: 0; padding: 0; width: 20px; height: 20px; font-size: 13px; line-height: 1;
+      border-color: #bbb; color: #444;
+    }
+    #tune-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    #controls #tune-reset-all { min-width: 0; padding: 5px 10px; font-size: 12px; }
+    #tune-legend { display: flex; gap: 12px; margin: -4px 0 10px; color: #444; }
+    #tune-legend i { display: inline-block; width: 14px; height: 3px; margin-right: 4px; vertical-align: middle; border-radius: 2px; }
     .tune-row output { font-variant-numeric: tabular-nums; }
-    .tune-row input { grid-column: 1 / -1; width: 100%; accent-color: #000; }
+    .tune-row input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: #000; }
     #tune-summary { font: 11px/1.4 ui-monospace, Menlo, monospace; word-break: break-all; color: #444; user-select: all; }
   </style>
 </head>
@@ -35,6 +43,15 @@
     <button id="tune-toggle" type="button" aria-expanded="false" aria-controls="tune-panel">Tune</button>
   </div>
   <div id="tune-panel" hidden>
+    <div id="tune-header">
+      <strong>Tune</strong>
+      <button id="tune-reset-all" type="button">Reset all</button>
+    </div>
+    <div id="tune-rows"></div>
+    <div id="tune-legend" aria-label="Axis guide colours, shown while changing the tilt">
+      <span><i style="background:#d4a531"></i>Secondary axis</span>
+      <span><i style="background:#1f9d74"></i>Primary axis</span>
+    </div>
     <div id="tune-summary"></div>
   </div>
 </div>

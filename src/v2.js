@@ -20,12 +20,20 @@ window.addEventListener('resize', () => {
 });
 
 // ── Inner sphere ────────────────────────────────────────────────────────────
+// White core that hides the far side of the dot shell (radius 1). Its size
+// is set as a fraction of the shell in applySizes().
 const innerSphere = new THREE.Mesh(
-  new THREE.SphereGeometry(0.97, 64, 64),
+  new THREE.SphereGeometry(1, 64, 64),
   new THREE.MeshBasicMaterial({ color: 0xffffff })
 );
+// Invisible shell-sized target for hover-to-pause, so hover still covers
+// the whole sphere when the inner sphere is shrunk.
+const hoverTarget = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 32, 32),
+  new THREE.MeshBasicMaterial({ visible: false })
+);
 const group = new THREE.Group();
-group.add(innerSphere);
+group.add(innerSphere, hoverTarget);
 scene.add(group);
 
 // ── Yin-yang classification ────────────────────────────────────────────────
@@ -87,16 +95,20 @@ function makeFibGrid(count) {
 const params = new URLSearchParams(location.search);
 const num = (key, fallback) => (params.has(key) && params.get(key) !== '' && !isNaN(Number(params.get(key))))
   ? Number(params.get(key)) : fallback;
-const settings = {
-  dense:   num('dense',   70000),  // total particles = size of dense grid
-  sparse:  num('sparse',  1800),   // size of sparse grid (~dense/sparse particles per sparse home)
-  reach:   num('reach',   5),      // typical hop between homes, degrees
-  spring:  num('spring',  0.008),  // spring constant toward the current home
-  damping: num('damping', 0.88),   // velocity kept each frame
-  spin:    num('spin',    0.004),  // primary spin about the field's own axis, radians per frame
-  spin2:   num('spin2',   0),      // secondary spin about the tilted world axis, radians per frame
-  tilt:    num('tilt',    90),     // secondary axis, degrees from Z toward Y
+const DEFAULTS = {
+  dense:   70000,  // total particles = size of dense grid
+  sparse:  1800,   // size of sparse grid (~dense/sparse particles per sparse home)
+  reach:   5,      // typical hop between homes, degrees
+  spring:  0.008,  // spring constant toward the current home
+  damping: 0.88,   // velocity kept each frame
+  spin:    0.004,  // primary spin about the field's own axis, radians per frame
+  spin2:   0,      // secondary spin about the tilted world axis, radians per frame
+  tilt:    90,     // secondary axis, degrees from Z toward Y
+  size:    1,      // overall scale of the sphere
+  inner:   97,     // inner white sphere radius, % of the dot shell
 };
+const settings = Object.fromEntries(
+  Object.entries(DEFAULTS).map(([key, value]) => [key, num(key, value)]));
 
 let N, M, denseGrid, sparseGrid, sparseAssign, pos, vel;
 
@@ -170,6 +182,10 @@ const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const secondaryAxis = new THREE.Vector3();
 
 function advanceField(primaryAngle, secondaryAngle) {
+  // Leave the field exactly as it is when nothing turns: renormalizing a
+  // still quaternion nudges it by rounding error each frame, which flips
+  // dense homes that sit exactly on a boundary (e.g. the poles) back and forth.
+  if (primaryAngle === 0 && secondaryAngle === 0) return;
   qStep.setFromAxisAngle(Z_AXIS, -primaryAngle);
   field.multiply(qStep);                       // about body Z
   const tilt = settings.tilt * Math.PI / 180;
@@ -340,7 +356,8 @@ window.addEventListener('mousemove', e => {
   mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1;
   mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
-  hovering = raycaster.intersectObject(innerSphere).length > 0;
+  const overControls = e.target instanceof Element && e.target.closest('#controls');
+  hovering = !overControls && raycaster.intersectObject(hoverTarget).length > 0;
 
   if (!dragging) return;
   if (lastX === null) { lastX = e.clientX; lastY = e.clientY; return; }
@@ -373,53 +390,149 @@ resetBtn.addEventListener('click', () => {
   points.geometry.attributes.position.needsUpdate = true;
 });
 
+// ── Sizes ──────────────────────────────────────────────────────────────────
+function applySizes() {
+  group.scale.setScalar(settings.size);
+  innerSphere.scale.setScalar(settings.inner / 100);
+  innerSphere.visible = settings.inner > 0;
+}
+applySizes();
+
+// ── Axis guides ────────────────────────────────────────────────────────────
+// Shown (and the spin paused) while the axis tilt is being changed, so the
+// effect of the change is visible: gold = secondary axis (fixed in the
+// world), green = primary axis (the field's own pole, which the secondary
+// spin carries around).
+function makeAxisRod(color) {
+  const rod = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.008, 0.008, 2.8, 12),
+    new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.9 }));
+  rod.renderOrder = 10;  // draw over the particles and through the sphere
+  rod.visible = false;
+  group.add(rod);
+  return rod;
+}
+const secondaryRod = makeAxisRod(0xd4a531);
+const primaryRod   = makeAxisRod(0x1f9d74);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const axisDir = new THREE.Vector3();
+
+function updateAxisRods() {
+  const tilt = settings.tilt * Math.PI / 180;
+  axisDir.set(0, Math.sin(tilt), Math.cos(tilt));
+  secondaryRod.quaternion.setFromUnitVectors(Y_AXIS, axisDir);
+  axisDir.set(0, 0, 1).applyQuaternion(field);
+  primaryRod.quaternion.setFromUnitVectors(Y_AXIS, axisDir);
+}
+
+let axisEditing = false;
+let axisEditTimer = null;
+function beginAxisEdit() {
+  clearTimeout(axisEditTimer);
+  axisEditing = true;
+  secondaryRod.visible = primaryRod.visible = true;
+}
+function endAxisEditSoon() {
+  clearTimeout(axisEditTimer);
+  axisEditTimer = setTimeout(() => {
+    axisEditing = false;
+    secondaryRod.visible = primaryRod.visible = false;
+  }, 1500);
+}
+
 // ── Tune panel ─────────────────────────────────────────────────────────────
 // Spring, damping, spins and axis tilt apply instantly. Dense, sparse and
 // reach rebuild the particles (on release), keeping the field orientation.
 const TUNERS = [
-  { key: 'dense',   label: 'Dense dots',   min: 10000, max: 150000, step: 5000,   rebuild: true, fmt: v => v.toLocaleString() },
-  { key: 'sparse',  label: 'Sparse spots', min: 200,   max: 6000,   step: 100,    rebuild: true, fmt: v => v.toLocaleString() },
-  { key: 'reach',   label: 'Reach (°)',    min: 0,     max: 20,     step: 0.5,    rebuild: true, fmt: v => v.toFixed(1) },
-  { key: 'spring',  label: 'Spring',       min: 0.001, max: 0.05,   step: 0.001,  fmt: v => v.toFixed(3) },
-  { key: 'damping', label: 'Damping',      min: 0.5,   max: 0.99,   step: 0.01,   fmt: v => v.toFixed(2) },
+  { key: 'dense',   label: 'Yin dots',   min: 10000, max: 150000, step: 5000,   rebuild: true, fmt: v => v.toLocaleString() },
+  { key: 'sparse',  label: 'Yang dots', min: 200,   max: 6000,   step: 100,    rebuild: true, fmt: v => v.toLocaleString() },
+  { key: 'reach',   label: 'Reach (how far dots travel)', min: 0, max: 20, step: 0.5, rebuild: true, fmt: v => `${v.toFixed(1)}°` },
+  { key: 'spring',  label: 'Spring (pull toward home)',       min: 0.001, max: 0.05,   step: 0.001,  fmt: v => v.toFixed(3) },
+  { key: 'damping', label: 'Damping (higher = glides longer)',      min: 0.5,   max: 0.99,   step: 0.01,   fmt: v => v.toFixed(2) },
   { key: 'spin',    label: 'Primary spin (own axis)', min: -0.02, max: 0.02, step: 0.0005, fmt: v => v.toFixed(4) },
   { key: 'spin2',   label: 'Secondary spin',          min: -0.02, max: 0.02, step: 0.0005, fmt: v => v.toFixed(4) },
-  { key: 'tilt',    label: 'Secondary axis tilt (°)', min: 0,    max: 180,  step: 1,      fmt: v => v.toFixed(0) },
+  { key: 'tilt',    label: 'Secondary axis tilt (°)', min: 0,    max: 180,  step: 1,      fmt: v => v.toFixed(0), axis: true },
+  { key: 'size',    label: 'Overall size',            min: 0.3,  max: 2,    step: 0.05,   fmt: v => `${v.toFixed(2)}×`, sizes: true },
+  { key: 'inner',   label: 'Inner sphere (% of dot shell)', min: 0, max: 100, step: 1,   fmt: v => `${v.toFixed(0)}%`, sizes: true },
 ];
 
 const tunePanel   = document.getElementById('tune-panel');
 const tuneToggle  = document.getElementById('tune-toggle');
 const tuneSummary = document.getElementById('tune-summary');
+const tuneRows    = document.getElementById('tune-rows');
+const resetAllBtn = document.getElementById('tune-reset-all');
 
 function refreshSummary() {
   tuneSummary.textContent = TUNERS.map(t => `${t.key}=${Number(settings[t.key].toFixed(4))}`).join('&');
 }
 
+const sliderUI = {};  // key → { input, value }
+
+// Apply a value from code (reset buttons): update the slider and the scene.
+function applySetting(t, v) {
+  const changed = settings[t.key] !== v;
+  settings[t.key] = v;
+  sliderUI[t.key].input.value = v;
+  sliderUI[t.key].value.textContent = t.fmt(v);
+  return changed;
+}
+
 for (const t of TUNERS) {
-  const row = document.createElement('label');
+  const row = document.createElement('div');
   row.className = 'tune-row';
-  const name  = document.createElement('span');
+  const input = document.createElement('input');
+  Object.assign(input, { id: `tune-${t.key}`, type: 'range', min: t.min, max: t.max, step: t.step, value: settings[t.key] });
+  const name = document.createElement('label');
+  name.htmlFor = input.id;
   name.textContent = t.label;
   const value = document.createElement('output');
+  value.htmlFor = input.id;
   value.textContent = t.fmt(settings[t.key]);
-  const input = document.createElement('input');
-  Object.assign(input, { type: 'range', min: t.min, max: t.max, step: t.step, value: settings[t.key] });
+  const reset = document.createElement('button');
+  Object.assign(reset, { type: 'button', className: 'tune-reset', textContent: '↺', title: `Reset to ${t.fmt(DEFAULTS[t.key])}` });
+  reset.setAttribute('aria-label', `Reset ${t.label} to ${t.fmt(DEFAULTS[t.key])}`);
+  sliderUI[t.key] = { input, value };
+
   input.addEventListener('input', () => {
     const v = Number(input.value);
     value.textContent = t.fmt(v);
+    if (t.axis) beginAxisEdit();
     if (!t.rebuild) { settings[t.key] = v; refreshSummary(); }
+    if (t.sizes) applySizes();
   });
-  if (t.rebuild) {
-    input.addEventListener('change', () => {
+  input.addEventListener('change', () => {
+    if (t.axis) endAxisEditSoon();
+    if (t.rebuild) {
       settings[t.key] = Number(input.value);
       rebuild();
       refreshSummary();
-    });
+    }
+  });
+  if (t.axis) {
+    input.addEventListener('pointerdown', beginAxisEdit);
+    input.addEventListener('pointerup', endAxisEditSoon);
   }
-  row.append(name, value, input);
-  tunePanel.insertBefore(row, tuneSummary);
+  reset.addEventListener('click', () => {
+    if (t.axis) { beginAxisEdit(); endAxisEditSoon(); }
+    if (applySetting(t, DEFAULTS[t.key]) && t.rebuild) rebuild();
+    if (t.sizes) applySizes();
+    refreshSummary();
+  });
+
+  row.append(name, value, reset, input);
+  tuneRows.append(row);
 }
 refreshSummary();
+
+resetAllBtn.addEventListener('click', () => {
+  let needsRebuild = false;
+  for (const t of TUNERS) {
+    if (applySetting(t, DEFAULTS[t.key]) && t.rebuild) needsRebuild = true;
+  }
+  if (needsRebuild) rebuild();
+  applySizes();
+  refreshSummary();
+});
 
 tuneToggle.addEventListener('click', () => {
   const open = tunePanel.hidden;
@@ -431,7 +544,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
 
-  if (!spinning) {
+  if (!spinning || axisEditing) {
     motion += (0 - motion) * 0.15;  // quick ease to a stop
     if (motion < 1e-4) motion = 0;
   } else if (hovering) {
@@ -450,6 +563,7 @@ function animate() {
 
   advanceField(settings.spin * motion, settings.spin2 * motion);
   physicsStep();
+  if (primaryRod.visible) updateAxisRods();
   renderer.render(scene, camera);
 }
 
