@@ -58,6 +58,7 @@ const params = new URLSearchParams(location.search);
 const num = (key, fallback) => (params.has(key) && params.get(key) !== '' && !isNaN(Number(params.get(key))))
   ? Number(params.get(key)) : fallback;
 const DEFAULTS = {
+  dot:     1,      // dot size, CSS pixels
   dense:   70000,  // total particles = size of dense grid
   sparse:  1800,   // size of sparse grid (~dense/sparse particles per sparse home)
   reach:   5,      // typical hop between homes, degrees
@@ -142,7 +143,7 @@ function makeCircleTexture(r, g, b) {
 
 // ── Geometry + material ────────────────────────────────────────────────────
 const points = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({
-  size: 1.0 * window.devicePixelRatio,
+  size: settings.dot * window.devicePixelRatio,
   sizeAttenuation: false,
   map: makeCircleTexture(0, 0, 0),
   color: 0x000000,
@@ -297,6 +298,7 @@ resetBtn.addEventListener('click', () => {
 
 // ── Sizes ──────────────────────────────────────────────────────────────────
 function applySizes() {
+  points.material.size = settings.dot * window.devicePixelRatio;
   group.scale.setScalar(settings.size);
   innerSphere.scale.setScalar(settings.inner / 100);
   innerSphere.visible = settings.inner > 0;
@@ -349,6 +351,7 @@ function endAxisEditSoon() {
 // Spring, damping, spins and axis tilt apply instantly. Dense, sparse and
 // reach rebuild the particles (on release), keeping the field orientation.
 const TUNERS = [
+  { key: 'dot',     label: 'Dot size',     min: 0.5,   max: 4,      step: 0.1,    fmt: v => `${v.toFixed(1)} px`, sizes: true },
   { key: 'dense',   label: 'Yin dots',   min: 10000, max: 150000, step: 5000,   rebuild: true, fmt: v => v.toLocaleString() },
   { key: 'sparse',  label: 'Yang dots', min: 200,   max: 6000,   step: 100,    rebuild: true, fmt: v => v.toLocaleString() },
   { key: 'reach',   label: 'Reach (how far dots travel)', min: 0, max: 20, step: 0.5, rebuild: true, fmt: v => `${v.toFixed(1)}°` },
