@@ -13,7 +13,7 @@
 <h2>v2 unit tests</h2>
 <div id="results"></div>
 <script type="module">
-import { isYin, isYinSphere, makeFibGrid, assignSparseHomes } from '../src/v2-core.js';
+import { isYin, isYinSphere, makeFibGrid, assignSparseHomes, clampToRange, DEFAULTS, RANGES } from '../src/v2-core.js';
 
 const results = document.getElementById('results');
 let passed = 0, failed = 0;
@@ -30,6 +30,30 @@ const deg = rad => rad * 180 / Math.PI;
 const angle = (a, i, b, j) => deg(Math.acos(Math.max(-1, Math.min(1,
   a[i] * b[j] + a[i + 1] * b[j + 1] + a[i + 2] * b[j + 2]))));
 const median = xs => { const s = [...xs].sort((p, q) => p - q); return s[Math.floor(s.length / 2)]; };
+
+// ── Settings: URL values are clamped and snapped ─────────────────────────
+{
+  const r = { min: 0.5, max: 2.5, step: 0.1 };
+  assert(clampToRange(null, r, 1) === 1,        'clamp: missing value → default');
+  assert(clampToRange('', r, 1) === 1,          'clamp: empty value → default');
+  assert(clampToRange('  ', r, 1) === 1,        'clamp: blank value → default');
+  assert(clampToRange('abc', r, 1) === 1,       'clamp: non-number → default');
+  assert(clampToRange('Infinity', r, 1) === 1,  'clamp: Infinity → default');
+  assert(clampToRange('NaN', r, 1) === 1,       'clamp: NaN → default');
+  assert(clampToRange('9', r, 1) === 2.5,       'clamp: above max → max');
+  assert(clampToRange('-3', r, 1) === 0.5,      'clamp: below min → min');
+  assert(clampToRange('1.23', r, 1) === 1.2,    'clamp: snapped to the slider step (1.23 → 1.2)');
+  assert(clampToRange('0.3', { min: 0, max: 1, step: 0.1 }, 0) === 0.3, 'clamp: no float noise (0.3 stays 0.3)');
+  assert(clampToRange('77777', RANGES.dense, 1) === 80000, 'clamp: dense snaps to 5,000s (77,777 → 80,000)');
+  assert(clampToRange('0', RANGES.sparse, 1) === 200, 'clamp: sparse 0 → 200 (no zero-size grid)');
+  assert(clampToRange('1.5', RANGES.damping, 1) === 0.99, 'clamp: damping ≥ 1 → 0.99 (no runaway motion)');
+}
+{
+  const missing = Object.keys(DEFAULTS).filter(k => !RANGES[k]);
+  assert(missing.length === 0, `every setting has a range (${missing.join(', ') || 'none missing'})`);
+  const bad = Object.entries(DEFAULTS).filter(([k, v]) => clampToRange(String(v), RANGES[k], NaN) !== v).map(([k]) => k);
+  assert(bad.length === 0, `every default is a value its slider can reach (${bad.join(', ') || 'all ok'})`);
+}
 
 // ── isYin tests ───────────────────────────────────────────────────────────
 assert(isYin(2, 0) === false,        'outside unit circle → false');

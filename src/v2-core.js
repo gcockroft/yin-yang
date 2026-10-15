@@ -1,6 +1,49 @@
 // Pure yin-yang logic shared by v2.js and tests/v2-unit.html — no DOM or
 // Three.js, so it can be tested on its own.
 
+// ── Settings ───────────────────────────────────────────────────────────────
+export const DEFAULTS = {
+  dot:     1,      // dot size, CSS pixels
+  dense:   70000,  // total particles = size of dense grid
+  sparse:  1800,   // size of sparse grid (~dense/sparse particles per sparse home)
+  reach:   5,      // typical hop between homes, degrees
+  spring:  0.008,  // spring constant toward the current home
+  damping: 0.88,   // velocity kept each frame
+  spin:    0.004,  // primary spin about the field's own axis, radians per frame
+  spin2:   0,      // secondary spin about the tilted world axis, radians per frame
+  tilt:    90,     // secondary axis, degrees from Z toward Y
+  size:    1,      // overall scale of the sphere
+  inner:   97,     // inner white sphere radius, % of the dot shell
+};
+// Allowed range and step for every setting — shared by the sliders and by
+// URL parsing, so a URL value can never go beyond what a slider can set.
+export const RANGES = {
+  dot:     { min: 0.5,   max: 2.5,    step: 0.1    },
+  dense:   { min: 10000, max: 150000, step: 5000   },
+  sparse:  { min: 200,   max: 6000,   step: 100    },
+  reach:   { min: 0,     max: 20,     step: 0.5    },
+  spring:  { min: 0.001, max: 0.05,   step: 0.001  },
+  damping: { min: 0.5,   max: 0.99,   step: 0.01   },
+  spin:    { min: -0.1,  max: 0.1,    step: 0.0005 },
+  spin2:   { min: -0.1,  max: 0.1,    step: 0.0005 },
+  tilt:    { min: 0,     max: 180,    step: 1      },
+  size:    { min: 0.3,   max: 2,      step: 0.05   },
+  inner:   { min: 0,     max: 100,    step: 1      },
+};
+
+// Parse a raw (e.g. URL) value into range: missing, blank or non-finite →
+// fallback; otherwise snapped to the step grid from min and clamped to
+// [min, max]. Rounded to the step's decimals so 0.1 steps give 0.3, not
+// 0.30000000000000004.
+export function clampToRange(raw, { min, max, step }, fallback) {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return fallback;
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return fallback;
+  const decimals = (String(step).split('.')[1] || '').length;
+  const snapped = Number((min + Math.round((v - min) / step) * step).toFixed(decimals));
+  return Math.min(max, Math.max(min, snapped));
+}
+
 // ── Yin-yang classification ────────────────────────────────────────────────
 export function isYin(px, py) {
   if (px * px + py * py > 1.0) return false;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { isYinSphere, makeFibGrid, assignSparseHomes } from './v2-core.js';
+import { isYinSphere, makeFibGrid, assignSparseHomes, clampToRange, DEFAULTS, RANGES } from './v2-core.js';
 
 // ── Scene ──────────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -54,24 +54,11 @@ scene.add(group);
 //
 // All of these are tunable live from the Tune panel; the starting values
 // can also come from the URL, e.g. v2.html?dense=80000&sparse=1500&reach=10
+// URL values are clamped to RANGES and snapped to the slider step; anything
+// missing or not a finite number falls back to the default.
 const params = new URLSearchParams(location.search);
-const num = (key, fallback) => (params.has(key) && params.get(key) !== '' && !isNaN(Number(params.get(key))))
-  ? Number(params.get(key)) : fallback;
-const DEFAULTS = {
-  dot:     1,      // dot size, CSS pixels
-  dense:   70000,  // total particles = size of dense grid
-  sparse:  1800,   // size of sparse grid (~dense/sparse particles per sparse home)
-  reach:   5,      // typical hop between homes, degrees
-  spring:  0.008,  // spring constant toward the current home
-  damping: 0.88,   // velocity kept each frame
-  spin:    0.004,  // primary spin about the field's own axis, radians per frame
-  spin2:   0,      // secondary spin about the tilted world axis, radians per frame
-  tilt:    90,     // secondary axis, degrees from Z toward Y
-  size:    1,      // overall scale of the sphere
-  inner:   97,     // inner white sphere radius, % of the dot shell
-};
-const settings = Object.fromEntries(
-  Object.entries(DEFAULTS).map(([key, value]) => [key, num(key, value)]));
+const settings = Object.fromEntries(Object.entries(DEFAULTS).map(([key, fallback]) =>
+  [key, clampToRange(params.get(key), RANGES[key], fallback)]));
 
 let N, M, denseGrid, sparseGrid, sparseAssign, pos, vel;
 
@@ -351,17 +338,17 @@ function endAxisEditSoon() {
 // Spring, damping, spins and axis tilt apply instantly. Dense, sparse and
 // reach rebuild the particles (on release), keeping the field orientation.
 const TUNERS = [
-  { key: 'dot',     label: 'Dot size',     min: 0.5,   max: 2.5,    step: 0.1,    fmt: v => `${v.toFixed(1)} px`, sizes: true },
-  { key: 'dense',   label: 'Yin dots',   min: 10000, max: 150000, step: 5000,   rebuild: true, fmt: v => v.toLocaleString() },
-  { key: 'sparse',  label: 'Yang dots', min: 200,   max: 6000,   step: 100,    rebuild: true, fmt: v => v.toLocaleString() },
-  { key: 'reach',   label: 'Reach (how far dots travel)', min: 0, max: 20, step: 0.5, rebuild: true, fmt: v => `${v.toFixed(1)}°` },
-  { key: 'spring',  label: 'Spring (pull toward home)',       min: 0.001, max: 0.05,   step: 0.001,  fmt: v => v.toFixed(3) },
-  { key: 'damping', label: 'Damping (higher = glides longer)',      min: 0.5,   max: 0.99,   step: 0.01,   fmt: v => v.toFixed(2) },
-  { key: 'spin',    label: 'Primary spin (own axis)', min: -0.1, max: 0.1, step: 0.0005, fmt: v => v.toFixed(4) },
-  { key: 'spin2',   label: 'Secondary spin',          min: -0.1, max: 0.1,  step: 0.0005, fmt: v => v.toFixed(4) },
-  { key: 'tilt',    label: 'Secondary axis tilt (°)', min: 0,    max: 180,  step: 1,      fmt: v => v.toFixed(0), axis: true },
-  { key: 'size',    label: 'Overall size',            min: 0.3,  max: 2,    step: 0.05,   fmt: v => `${v.toFixed(2)}×`, sizes: true },
-  { key: 'inner',   label: 'Inner sphere (% of dot shell)', min: 0, max: 100, step: 1,   fmt: v => `${v.toFixed(0)}%`, sizes: true },
+  { key: 'dot', label: 'Dot size', ...RANGES.dot, fmt: v => `${v.toFixed(1)} px`, sizes: true },
+  { key: 'dense', label: 'Yin dots', ...RANGES.dense, rebuild: true, fmt: v => v.toLocaleString() },
+  { key: 'sparse', label: 'Yang dots', ...RANGES.sparse, rebuild: true, fmt: v => v.toLocaleString() },
+  { key: 'reach', label: 'Reach (how far dots travel)', ...RANGES.reach, rebuild: true, fmt: v => `${v.toFixed(1)}°` },
+  { key: 'spring', label: 'Spring (pull toward home)', ...RANGES.spring, fmt: v => v.toFixed(3) },
+  { key: 'damping', label: 'Damping (higher = glides longer)', ...RANGES.damping, fmt: v => v.toFixed(2) },
+  { key: 'spin', label: 'Primary spin (own axis)', ...RANGES.spin, fmt: v => v.toFixed(4) },
+  { key: 'spin2', label: 'Secondary spin', ...RANGES.spin2, fmt: v => v.toFixed(4) },
+  { key: 'tilt', label: 'Secondary axis tilt (°)', ...RANGES.tilt, fmt: v => v.toFixed(0), axis: true },
+  { key: 'size', label: 'Overall size', ...RANGES.size, fmt: v => `${v.toFixed(2)}×`, sizes: true },
+  { key: 'inner', label: 'Inner sphere (% of dot shell)', ...RANGES.inner, fmt: v => `${v.toFixed(0)}%`, sizes: true },
 ];
 
 const tunePanel   = document.getElementById('tune-panel');
